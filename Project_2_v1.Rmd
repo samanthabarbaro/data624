@@ -3,16 +3,16 @@ title: "Project 2 Data 624"
 author: "Samantha Barbaro, Catherine Dube, Luis Hernandez"
 date: "2026-05-06"
 output:
+  pdf_document:
+    toc: true
+    toc_depth: 3
+    number_sections: true
   html_document:
     toc: true
     toc_float: true
     toc_depth: 3
     number_sections: true
     code_folding: hide
-  pdf_document:
-    toc: true
-    toc_depth: 3
-    number_sections: true
 ---
 
 # Project 2
