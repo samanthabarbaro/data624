@@ -35,7 +35,9 @@ pacman::p_load(
    naniar,
    corrplot,
    caret,
-   RANN
+   RANN,
+   glmnet,
+   randomForest
 )
 
 projPath <- if (interactive()) {
@@ -49,7 +51,7 @@ projPath <- if (interactive()) {
 
 > Recap located at the end of the section. Skip there to jump past the code/workflow.
 
-```{r}
+```{r load-data}
 library(tidyverse)
 library(VIM)
 
@@ -58,7 +60,7 @@ test_data <- read.csv(file.path(projPath, "testdataproj2.csv"), na.strings = c("
 training_data <- read.csv(file.path(projPath, "trainingdataproj2.csv"), na.strings = c("", "NA", "null", "NULL"),  header = TRUE)
 ```
 
-```{r}
+```{r glimpse-data}
 glimpse(test_data)
 glimpse(training_data)
 str(training_data)
@@ -86,7 +88,7 @@ We'll look at:
 
 ### Number of cases
 
-```{r}
+```{r count-rows}
 
 nrow(training_data)
 nrow(test_data)
@@ -98,7 +100,7 @@ The training data has 2571 cases and the test data has 267.
 
 Counting the number of columns/variables:
 
-```{r}
+```{r count-cols}
 
 ncol(test_data)
 ncol(training_data)
@@ -108,7 +110,7 @@ Both data sets have 33 columns.
 
 Are all the variables represented in both data sets?
 
-```{r}
+```{r check-colnames}
 colnames(test_data) 
 colnames(training_data)
 ```
@@ -125,7 +127,7 @@ How many missing values are there? Are there any trends? How many complete cases
 
 Count nulls/missing values in the evaluation set:
 
-```{r}
+```{r eval-set-na-cols}
 
 sort(colSums(is.na(test_data)), decreasing = TRUE)
 
@@ -137,7 +139,7 @@ Most columns are missing a few (under 10) values or none at all. MFR is missing 
 
 Next, we'll look at the data row-wise and see if there are full or close-to-full missing cases.
 
-```{r}
+```{r eval-set-na-rows}
 
 rowSums(is.na(test_data))
 
@@ -160,7 +162,7 @@ One case has 14 missing values, so it may make sense to drop that; another is mi
 
 Which variables are missing data?
 
-```{r}
+```{r train-set-na-cols}
 
 sort(colSums(is.na(training_data)), decreasing = TRUE)
 
@@ -170,7 +172,7 @@ MFR is missing 212 out of 2571 cases, about 8.2%. Brand code, the only categoric
 
 Let's see if anything strange is happening across rows:
 
-```{r}
+```{r train-set-na-rows}
 
 #nothing out of the ordinary across rows. Most rows are complete.
 #Rows with NAs typically 1 or 2 NAs, wich
@@ -185,7 +187,7 @@ sum(is.na(test_data))
 
 Overall, 844 values are missing across the training set, about 1% of all cells. 2038/2571 cases are complete. That's about 79% complete, 21% incomplete. Let's also check to see if the data is MCAR.
 
-```{r, warning=FALSE}
+```{r mcar-test, warning=FALSE}
 library(naniar)
 numeric_only <- training_data %>%
   select(-Brand.Code)
@@ -203,7 +205,7 @@ The p-value is 0, which means the data most likely isn't missing completely at r
 
 The training set has 120 rows where Brand.Code is blank (about 4.7% of cases). Before deciding how to handle them in modeling, we check whether those rows look different from the rest. If the missingness carries signal about PH, we should preserve it rather than impute it away.
 
-```{r}
+```{r brand-na-vs-ph}
 # How does PH look in rows where Brand.Code is missing vs known?
 training_data %>%
   mutate(brand_missing = is.na(Brand.Code) | Brand.Code == "") %>%
@@ -247,7 +249,7 @@ We'll cover:
 
 This data set has 33 variables. Let's check to see if they're all (potentially) providing useful predictive information by testing for near-zero or zero variance.
 
-```{r}
+```{r nzv-check}
 library(caret)
 nzv_results <- nearZeroVar(training_data, saveMetrics = TRUE)
 
@@ -260,7 +262,7 @@ Hyd.Pressure1 has a near-zero variance, so we could eliminate that one.
 
 We'll create a correlation grid, so we can see actual correlation between variables. We'll also create a correlation plot and use findCorrelation from the caret package to find variables that have 90% or higher correlation.
 
-```{r}
+```{r correlation-grid}
 correlation_grid <- training_data %>% 
   drop_na() %>%
   select(-Brand.Code) %>%
@@ -287,7 +289,7 @@ There are many highly correlated variables. A quick scan shows:
 
 Here's a correlation plot so we can see all the positively and negatively correlated variables:
 
-```{r}
+```{r correlation-plot}
 library(corrplot)
 
 grid <- training_data %>% 
@@ -303,7 +305,7 @@ There are many negatively correlated variables here that do not need to be remov
 
 The findCorrelation feature will decide which variables to drop (it leaves the variable that best represents the group):
 
-```{r}
+```{r find-correlated}
 library(caret)
 
 #if we remove colinear variables at 95% correlation, we would drop 10 variables
@@ -325,7 +327,7 @@ Removing some of the 33 variables will help simplify this data set. We will remo
 
 the findcorrelation function says to drop Filler.Speed instead of MFR. However, we will opt to drop MFR instead, given that it has the highest number of missing values (filler.speed has 57 as opposed to MFR's 212). Having to impute all these values will makes the variable less reliable, and dropping it would mean having to drop more cases.
 
-```{r}
+```{r drop-correlated-vars}
 #removing the variable with NZV
 training_data_new <- training_data %>%
   select(-Hyd.Pressure1)
@@ -347,7 +349,7 @@ test_data_new <- test_data %>%
 
 Before we deal with missing values, let's see if there are any glaring outliers or data entry errors.
 
-```{r}
+```{r summary-cleaned-sets}
 #may be an outlier in oxygen filler - the max calues is much higher than the 
 
 summary(test_data_new)
@@ -361,7 +363,7 @@ After quickly browsing the remaining variables, while some of the fields have a 
 
 Let's check histograms to see if anything stands out:
 
-```{r, echo=FALSE, fig.width=20, fig.height=15}
+```{r predictor-histograms, echo=FALSE, fig.width=20, fig.height=15}
 #all remaining variables (minus brand code) 
 training_data_new %>%
     pivot_longer(where(is.numeric)) %>%
@@ -381,7 +383,7 @@ A few are more clearly bimodal/have very different peaks on either side of the g
 
 Finally, some are skewed right: in addition to the varaibles mentioned above, oxygen filler looks like it may have some outliers, and psc co2 has a strange distribution, where the variable clusters around certain values, almost like a discrete variable.
 
-```{r}
+```{r per-var-distributions}
 #histograms
 
 for (col in names(training_data_new %>% select(-Brand.Code))) {
@@ -397,7 +399,7 @@ for (col in names(training_data_new %>% select(-Brand.Code))) {
 
 Calculating the number of outliers in each column based on the IQR method
 
-```{r}
+```{r outlier-iqr-counts}
 outliers <- sapply(training_data_new %>% select(-Brand.Code), function(x) {
   Q1 <- quantile(x, 0.25, na.rm=TRUE)
   Q3 <- quantile(x, 0.75, na.rm=TRUE)
@@ -409,7 +411,7 @@ outliers
 
 Cross-checking the graphs with the data set, we could remove the one Filler.Level value that appears on the top of the box plot, 161.2 when the next-highest is 154. pH has one comparatively high value (9.36) that's nowhere close to the next-highest value. We can remove that row - it's missing 4 other variables. PH at that level isn't impossible in beverage manufacturing, but with 4 missing predictor values in the same row and the value isolated far from the rest of the distribution, it reads more like a data entry issue than a legitimate measurement to learn from. Other outlier values are one of several similar values, and could be categorized that way due to the shape of the distribution and wide range of values. For example, it looks like there's one particularly high value for Oxygen.Filler, but when we check there are 5 cases with the same value.
 
-```{r}
+```{r remove-outliers}
 #removing the one outliers
 training_data_new <- training_data_new %>%
   filter(PH < 9 | is.na(PH)) %>%
@@ -422,7 +424,7 @@ training_data_no_na <- training_data_new %>%
 
 ### Looking at outliers in the test data set
 
-```{r}
+```{r eval-boxplots}
 #leaving out the categorical and blank response variable
 for (col in names(test_data_new %>% select(-Brand.Code, -PH))) {
   boxplot(test_data_new[[col]], main=col)
@@ -445,7 +447,7 @@ So we keep both:
 - `training_data_new` / `test_data_new`: 20 predictors after NZV removal and r > 0.90 correlation prune. Linear models, PLS, ridge / lasso / elastic net, and neural networks use this.
 - `training_data_wide` / `test_data_wide`: 31 predictors after just NZV removal. Random forest, gradient boosting, Cubist use this. The correlated-but-distinct sensor readings may each carry small bits of information a tree can exploit independently.
 
-```{r}
+```{r wide-feature-set}
 # wide feature set: post-NZV only, same outlier filters as the narrow set
 training_data_wide <- training_data %>%
   select(-Hyd.Pressure1) %>%
@@ -473,7 +475,7 @@ test_data_wide <- test_data %>%
 
 > Recap located at the end of the section. Skip there to jump past the code/workflow.
 
-```{r}
+```{r post-clean-na-check}
 sum(is.na(training_data_no_na))
 sort(colSums(is.na(training_data_no_na)), decreasing = TRUE)
 
@@ -486,7 +488,7 @@ table(rowSums(is.na(training_data_no_na)))
 
 2169 cases our of 2566 are complete, or about 85%. If we dropped all NAs, we would be dropping 15% of the data. Instead, we will use the VIM package for simple KNN imputation. This package just fills in the nearest neighbor--it doesn't change the other variables. Vim can handle categorical variables, like brand code. We'll use K=5.
 
-```{r}
+```{r impute-training}
 
 training_data_imputed <- kNN(training_data_no_na, k = 5)
 
@@ -499,7 +501,7 @@ sum(is.na(training_data_imputed))
 
 First, let's check how many missing values there are after we've removed columns in the evaluation set.
 
-```{r}
+```{r eval-na-summary}
 
 table(rowSums(is.na(test_data_new)))
 
@@ -514,14 +516,14 @@ Now there are only 60 missing values total. 42 rows have missing values. One row
 
 Imputing a row that sparse means the filled-in predictor values will be noisy, but the deliverable expects a prediction for every row in the evaluation set. We're keeping the row in and flagging the prediction as low-confidence rather than dropping it.
 
-```{r}
+```{r eval-row-count}
 #keeping all 267 rows; the sparse row gets imputed but its prediction is flagged downstream
 count(test_data_new)
 ```
 
 Imputing with the same method we used for the training data:
 
-```{r}
+```{r impute-eval}
 #list all columns except PH
 cols_to_impute <- setdiff(colnames(test_data_new), "PH")
 
@@ -544,7 +546,7 @@ sum(is.na(test_data_imputed))
 
 Breaking the training data set into an 80%/20% training and test set:
 
-```{r}
+```{r train-test-split}
 set.seed(624)
 
 train_index <- sample(nrow(training_data_imputed),
@@ -595,7 +597,7 @@ training_for_modeling <- training_data_no_na %>%
 
 # shared control object for every model. Sharing this AND seeding with set.seed(624)
 # right before each train() call keeps the CV folds identical across models.
-controlObject <- trainControl(method = "repeatedcv", number = 10, repeats = 5,
+controlObject <- trainControl(method = "cv", number = 10,
                               savePredictions = "final")
 
 # named list to accumulate fitted models for the final resamples() comparison
@@ -633,7 +635,7 @@ First model: ordinary linear regression. Mostly useful as a floor for later mode
 
 ### Linear regression (lm)
 
-```{r}
+```{r fit-lm}
 set.seed(624)
 
 lm_model <- train(
@@ -662,13 +664,13 @@ lm_model
 
 **Variable importance.** Which predictors matter most for PH under linear assumptions.
 
-```{r}
+```{r lm-varimp}
 plot(varImp(lm_model), top = 20)
 ```
 
 **Coefficients.** Sign and magnitude give direction and strength of each predictor's effect on PH (positive coefficient = predictor increases PH, negative = decreases PH). Sorted by absolute t-statistic.
 
-```{r}
+```{r lm-coefficients}
 lm_coefs <- summary(lm_model$finalModel)$coefficients %>%
   as.data.frame() %>%
   tibble::rownames_to_column("predictor") %>%
@@ -678,7 +680,7 @@ kable(lm_coefs, digits = 4)
 
 **Residual summary.** Out-of-fold residual stats and a quick check on how well predicted values cover the observed PH range.
 
-```{r}
+```{r lm-residuals}
 lm_preds <- lm_model$pred
 lm_preds$residual <- lm_preds$obs - lm_preds$pred
 
@@ -711,13 +713,189 @@ kable(residual_summary)
 - Top predictive factors (largest absolute t-statistics): `Mnf.Flow` (dominant), `Carb.Pressure1`, `Brand.CodeD`, `Filler.Level`, `Brand.CodeC`, `Usage.cont`, `Hyd.Pressure2`, `Temperature`.
 - Coefficient directions for business interpretation: higher `Mnf.Flow`, `Usage.cont`, `Temperature`, and `Oxygen.Filler` push PH down; higher `Carb.Pressure1`, `Filler.Level`, and `Hyd.Pressure2` push PH up. Brand D has the highest baseline PH, Brand C the lowest, with a spread of about 0.07 PH units between them.
 
+## Elastic net
+
+> Recap located at the end of the section. Skip there to jump past the code/workflow.
+
+Next model we're trying: elastic net via `glmnet`. This seemed like a good option, because it is the same linear-family setup as lm, plus it has a coefficient-shrinkage penalty that blends ridge (L2) and lasso (L1). It seemed like a better option than doing either ridge or lasso on its own. caret tunes both alpha (0 = pure ridge, 1 = pure lasso, in between = blended) and lambda (penalty strength), so the tuned model lands wherever on the ridge-to-lasso spectrum the data prefers.
+
+### Elastic net (glmnet)
+
+```{r fit-elastic-net}
+set.seed(624)
+
+elastic_model <- train(
+  PH ~ .,
+  data = training_for_modeling,
+  method = "glmnet",
+  trControl = controlObject,
+  preProcess = c("YeoJohnson", "center", "scale", "knnImpute"),
+  na.action = na.pass,
+  tuneLength = 10
+)
+
+models$elastic_net <- elastic_model
+
+# append CV metrics to the running comparison table
+model_metrics <- bind_rows(
+  model_metrics,
+  getTrainPerf(elastic_model) %>%
+    transmute(model = "elastic_net",
+              cv_RMSE = TrainRMSE,
+              cv_Rsquared = TrainRsquared,
+              cv_MAE = TrainMAE)
+)
+
+elastic_model
+```
+
+**Variable importance.**
+
+```{r elastic-net-varimp}
+plot(varImp(elastic_model), top = 20)
+```
+
+**Coefficients at the tuned lambda.** glmnet doesn't expose t-statistics (penalized regression invalidates classical inference), so we report just the coefficients sorted by absolute size. Coefficients exactly equal to zero have been shrunk out by the lasso component.
+
+```{r elastic-net-coefficients}
+elastic_coefs <- coef(elastic_model$finalModel,
+                      s = elastic_model$bestTune$lambda) %>%
+  as.matrix() %>%
+  as.data.frame()
+colnames(elastic_coefs) <- "coefficient"
+elastic_coefs <- elastic_coefs %>%
+  tibble::rownames_to_column("predictor") %>%
+  arrange(desc(abs(coefficient)))
+kable(elastic_coefs, digits = 4)
+```
+
+**Residual summary.**
+
+```{r elastic-net-residuals}
+elastic_preds <- elastic_model$pred
+elastic_preds$residual <- elastic_preds$obs - elastic_preds$pred
+
+residual_summary_elastic <- tibble(
+  metric = c("Mean residual",
+             "SD residual",
+             "Max |residual|",
+             "99th pct |residual|",
+             "Cor(predicted, residual)",
+             "Predicted PH range",
+             "Observed PH range"),
+  value = c(
+    sprintf("%.5f", mean(elastic_preds$residual)),
+    sprintf("%.4f", sd(elastic_preds$residual)),
+    sprintf("%.4f", max(abs(elastic_preds$residual))),
+    sprintf("%.4f", quantile(abs(elastic_preds$residual), 0.99)),
+    sprintf("%.4f", cor(elastic_preds$pred, elastic_preds$residual)),
+    sprintf("%.3f to %.3f", min(elastic_preds$pred), max(elastic_preds$pred)),
+    sprintf("%.3f to %.3f", min(elastic_preds$obs), max(elastic_preds$obs))
+  )
+)
+kable(residual_summary_elastic)
+```
+
+### Recap
+
+- Elastic net trained via 10-fold CV repeated 5 times, with caret tuning over alpha (0 = ridge, 1 = lasso) and lambda. Fitted model stored in `models$elastic_net`, CV metrics appended to `model_metrics`.
+- Tuned to alpha = 0.2 (mostly ridge with a sliver of lasso) and lambda = 0.0010 (very small). The data didn't want much regularization at all; elastic net essentially landed on "lm with a faint ridge nudge."
+- CV metrics are nearly identical to lm: RMSE ~0.1354, R-squared ~0.381, MAE ~0.106. The penalized linear family has hit its ceiling on this dataset.
+- Same top predictors in the same order as lm, with coefficients shrunk slightly toward zero. Only `Carb.Pressure` got zeroed out by the lasso component (in lm it had p = 0.96 and a near-zero estimate, so this is the right call).
+- Same range compression as lm (predicted 8.24-8.82 vs observed 7.88-8.94). The linear ceiling is real; we need a nonlinear method to improve. Tree-based next.
+
+## Random forest
+
+> Recap located at the end of the section. Skip there to jump past the code/workflow.
+
+First tree-based model: random forest via the `randomForest` engine, wrapped by caret. Trees split the predictor space recursively and don't require Box-Cox or scaling; they also handle collinearity natively, so this is where the wider 31-predictor set earns its keep. Random forest specifically fits many decorrelated trees on bootstrap samples and averages their predictions, which tends to dramatically reduce variance compared to a single tree.
+
+**Wide-set setup.** We mirror the Brand.Code "Unknown" treatment we used for the linear-family models, but on the wider feature set (`training_data_wide_no_na`).
+
+```{r setup-wide-modeling}
+training_for_modeling_wide <- training_data_wide_no_na %>%
+  mutate(Brand.Code = factor(ifelse(is.na(Brand.Code) | Brand.Code == "", "Unknown", Brand.Code)))
+```
+
+### Random forest
+
+```{r fit-random-forest}
+set.seed(624)
+
+rf_model <- train(
+  PH ~ .,
+  data = training_for_modeling_wide,
+  method = "rf",
+  trControl = controlObject,
+  preProcess = c("knnImpute"),
+  na.action = na.pass,
+  tuneLength = 5,
+  ntree = 200,
+  importance = TRUE
+)
+
+models$random_forest <- rf_model
+
+# append CV metrics to the running comparison table
+model_metrics <- bind_rows(
+  model_metrics,
+  getTrainPerf(rf_model) %>%
+    transmute(model = "random_forest",
+              cv_RMSE = TrainRMSE,
+              cv_Rsquared = TrainRsquared,
+              cv_MAE = TrainMAE)
+)
+
+rf_model
+```
+
+**Variable importance.**
+
+```{r rf-varimp}
+plot(varImp(rf_model), top = 20)
+```
+
+**Residual summary.**
+
+```{r rf-residuals}
+rf_preds <- rf_model$pred
+rf_preds$residual <- rf_preds$obs - rf_preds$pred
+
+residual_summary_rf <- tibble(
+  metric = c("Mean residual",
+             "SD residual",
+             "Max |residual|",
+             "99th pct |residual|",
+             "Cor(predicted, residual)",
+             "Predicted PH range",
+             "Observed PH range"),
+  value = c(
+    sprintf("%.5f", mean(rf_preds$residual)),
+    sprintf("%.4f", sd(rf_preds$residual)),
+    sprintf("%.4f", max(abs(rf_preds$residual))),
+    sprintf("%.4f", quantile(abs(rf_preds$residual), 0.99)),
+    sprintf("%.4f", cor(rf_preds$pred, rf_preds$residual)),
+    sprintf("%.3f to %.3f", min(rf_preds$pred), max(rf_preds$pred)),
+    sprintf("%.3f to %.3f", min(rf_preds$obs), max(rf_preds$obs))
+  )
+)
+kable(residual_summary_rf)
+```
+
+### Recap
+
+- Random forest trained via 10-fold CV repeated 5 times, on the wider 31-predictor feature set. Fitted model stored in `models$random_forest`, CV metrics appended to `model_metrics`.
+- (After knit:) Tuned `mtry` and how it compares to caret's default heuristic (`p/3`). Headline CV metrics.
+- (After knit:) Top predictive factors from varImp; comparison to the linear-family top predictors will tell us if Mnf.Flow remains dominant or if the wider feature set surfaces something different.
+- (After knit:) Whether the predicted PH range expands compared to the linear models (it should; that's the whole point of going nonlinear).
+
 ## Model comparison
 
-> Fills in once we have more than one model in `models`. Until then this section is a scaffold.
+> Fill in once we have more than one model in `models`. 
 
 All models share `controlObject` and were trained immediately after `set.seed(624)`, so the CV folds are identical across them. That lets us compare on the same resampling structure via `resamples()`.
 
-```{r, eval=FALSE}
+```{r resamples-comparison, eval=FALSE}
 # Uncomment once `models` has more than one entry
 resamps <- resamples(models)
 
@@ -743,11 +921,11 @@ kable(model_metrics %>% arrange(cv_RMSE))
 
 ## Evaluation set predictions
 
-> Fills in once a final model is picked.
+> Fill in once a final model is picked.
 
 The deliverable requires predictions on the eval set (`test_data_imputed`) in Excel format. We apply the chosen model with consistent feature engineering (Brand.Code factor levels aligned with the model's training levels) and write to xlsx.
 
-```{r, eval=FALSE}
+```{r eval-set-predictions, eval=FALSE}
 # Uncomment and adjust once the final model is picked
 # final_model <- models$<chosen>
 #
@@ -767,7 +945,7 @@ The deliverable requires predictions on the eval set (`test_data_imputed`) in Ex
 
 ### Recap
 
-- Fill in once the final model is determined.
+> Fill in once the final model is determined.
 
 ## Business takeaways (Informal)
 
