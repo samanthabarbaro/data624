@@ -72,9 +72,9 @@ All the rows with numbers are formatted as numbers. All the variables are numeri
 
 ### Recap
 
-- Loaded the training and evaluation sets from the project GitHub repo
-- Inspected the structure with `glimpse()` and `str()`
-- All variables came in as numeric except `Brand.Code`, which is the only categorical
+- Loaded the training set (2571 rows) and the evaluation set (267 rows) from the local CSVs in the repo.
+- Did a quick look at the structure with `glimpse()` and `str()` to confirm everything imported correctly.
+- All variables came in as numeric except `Brand.Code`, which is the only categorical predictor.
 
 ## Exploring the data
 
@@ -125,7 +125,7 @@ How many missing values are there? Are there any trends? How many complete cases
 
 #### Evaluation set (`test_data`)
 
-> Note: `test_data` here is the evaluation file used for the project deliverable. PH is intentionally blank in this file because that's what the model predicts. It's not a held-out test split from training.
+Note: `test_data` here is the evaluation file used for the project deliverable. PH is intentionally blank in this file because that's what the model predicts. It's not a held-out test split from training.
 
 Count nulls/missing values in the evaluation set:
 
@@ -230,16 +230,20 @@ That looks like what Kuhn and Johnson calls informative missingness: the absence
 ### Recap
 
 - 2571 training cases, 267 evaluation cases, 33 columns in both
-- All `PH` values in the evaluation set are missing. That file is what we predict on, not a test set
-- Missingness concentrates in `MFR` (~8% training, ~12% eval), `Brand.Code` (~5% training), and `Filler.Speed` (~2% training); everything else under 2%
-- ~79% of training cases are complete; the MCAR test (`naniar::mcar_test`) returned p ~ 0, so missingness isn't completely at random
-- A closer look at Brand.Code's missingness shows the 120 missing-Brand rows have a slightly lower mean PH and a narrower PH range than known-Brand rows, so the missingness itself looks informative; we'll preserve it rather than impute when modeling
+- All `PH` values in the evaluation set are missing. This is the file we are predicting on, not a test set
+- The missingness is concentrated in: 
+  - `MFR` (~8% training, ~12% eval)
+  - `Brand.Code` (~5% training) 
+  - `Filler.Speed` (~2% training)
+  - everything else was under 2%
+- ~79% of training cases are complete. We ran the MCAR test (`naniar::mcar_test`) which returned p ~ 0, so the missingness is not completely at random
+- Did some extra digging on Brand.Code's missingness (since it is categorical). And it shows the 120 missing-Brand rows have a slightly lower mean PH and a narrower PH range than known-Brand rows, so the missingness itself looks informative. Right now we're opting to preserve it rather than impute it when modeling.
 
 ## Data cleaning
 
 > Recap located at the end of the section. Skip there to jump past the code/workflow.
 
-We'll cover:
+In this section:
 
 - Variables with zero or near-zero variance
 
@@ -258,11 +262,11 @@ nzv_results <- nearZeroVar(training_data, saveMetrics = TRUE)
 nzv_results
 ```
 
-Hyd.Pressure1 has a near-zero variance, so we could eliminate that one.
+`Hyd.Pressure1` has a near-zero variance, so we could eliminate that one.
 
 ### Looking for highly correlated variables
 
-We'll create a correlation grid, so we can see actual correlation between variables. We'll also create a correlation plot and use findCorrelation from the caret package to find variables that have 90% or higher correlation.
+We'll create a correlation grid, so we can see actual correlation between variables. We'll also create a correlation plot and use `findCorrelation` from the `caret` package to find variables that have 90% or higher correlation.
 
 ```{r correlation-grid}
 correlation_grid <- training_data %>% 
@@ -277,17 +281,17 @@ correlation_grid
 
 There are many highly correlated variables. A quick scan shows:
 
-- hyd.pressure 2 and 3 have a .91 correlation
+- `hyd.pressure` 2 and 3 have a .91 correlation
 
-- filler.level and bowl.set.point have a .98 correlation
+- `filler.level` and bowl.set.point have a .98 correlation
 
-- fillers.speed and MFR have a .95 correlation
+- `fillers.speed` and MFR have a .95 correlation
 
-- density and balling.lvl have a .95 correlation
+- `Density` and `Balling.Lvl` have a .95 correlation
 
-- balling and balling.lvl have a .98 correlation; both are strongly correlated with density and alch rel.
+- `Balling` and `Balling.Lvl` have a .98 correlation; both are strongly correlated with `Density` and `Alch.Rel`
 
-- alch.rel and balling.lvl have a .95 correlation; it also has a .95 correlation with balling, balling.lvl, and .93 with density
+- `Alch.Rel` and `Balling.Lvl` have a .95 correlation; it also has a .95 correlation with `Balling`, `Balling.Lvl`, and .93 with `Density`
 
 Here's a correlation plot so we can see all the positively and negatively correlated variables:
 
@@ -303,9 +307,9 @@ corrplot(cor(grid),method = "square")
 
 ```
 
-There are many negatively correlated variables here that do not need to be removed, but may be helpful for analysis. We can see that the response variable, pH, has a strong negative correlation with some variables, including fill.pressure1, usage.cont, and Air.Pressurer.
+There are many negatively correlated variables here that do not need to be removed, but may be helpful for analysis. We can see that the response variable, pH, has a strong negative correlation with some variables, including `Fill.Pressure`, `Usage.cont`, and `Air.Pressurer`.
 
-The findCorrelation feature will decide which variables to drop (it leaves the variable that best represents the group):
+The `findCorrelation` feature will decide which variables to drop (it leaves the variable that best represents the group):
 
 ```{r find-correlated}
 library(caret)
@@ -327,7 +331,7 @@ colnames(grid)[indexestodrop90]
 
 Removing some of the 33 variables will help simplify this data set. We will remove the variable with NZV and highly colinear variables (greater than or about .90, as defined above).
 
-the findcorrelation function says to drop Filler.Speed instead of MFR. However, we will opt to drop MFR instead, given that it has the highest number of missing values (filler.speed has 57 as opposed to MFR's 212). Having to impute all these values will makes the variable less reliable, and dropping it would mean having to drop more cases.
+the `findcorrelation` function says to drop `Filler.Speed` instead of `MFR.` However, we will opt to drop `MFR` instead, given that it has the highest number of missing values (`Filler.Speed` has 57 as opposed to `MFR`'s 212). Having to impute all these values will makes the variable less reliable, and dropping it would mean having to drop more cases.
 
 ```{r drop-correlated-vars}
 #removing the variable with NZV
@@ -379,11 +383,11 @@ training_data_new %>% count(Brand.Code)
 
 ```
 
-Not all the data is normally distributed. pH, the response variable is normally distributed. Other variables close to a normal distribution include carb pressure, carb pressure 1 (slightly bimodal), carb temp, fill ounces, carb volume (also slightly bimodal), psc (skewed slightly right), pc volume, temperature (skewed slightly right), and psc fill (skewed right with a large peak).
+Not all the data is normally distributed. pH, the response variable is normally distributed. Other variables close to a normal distribution include `Carb.Pressure`, `Carb.Pressure1` (slightly bimodal), `Carb.Temp`, `Fill.Ounces`, `Carb.Volume` (also slightly bimodal), `PSC` (skewed slightly right), `PC.Volume`, `Temperature` (skewed slightly right), and `PSC.Fill` (skewed right with a large peak).
 
-A few are more clearly bimodal/have very different peaks on either side of the graph: air pressurer, carb flow, fill pressure, filler level, filler speed, , hyd pressure 2, mnf flow, and usage cont.
+A few are more clearly bimodal/have very different peaks on either side of the graph: `Air.Pressurer`, `Carb.Flow`, `Fill.Pressure`, `Filler.Level`, `Filler.Speed`, `Hyd.Pressure2`, `Mnf.Flow`, and `Usage.cont.`
 
-Finally, some are skewed right: in addition to the varaibles mentioned above, oxygen filler looks like it may have some outliers, and psc co2 has a strange distribution, where the variable clusters around certain values, almost like a discrete variable.
+Finally, some are skewed right: in addition to the varaibles mentioned above, `Oxygen.Filler` looks like it may have some outliers, and `PSC.CO2` has a strange distribution, where the variable clusters around certain values, almost like a discrete variable.
 
 ```{r per-var-distributions}
 #histograms
@@ -411,7 +415,7 @@ outliers <- sapply(training_data_new %>% select(-Brand.Code), function(x) {
 outliers
 ```
 
-Cross-checking the graphs with the data set, we could remove the one Filler.Level value that appears on the top of the box plot, 161.2 when the next-highest is 154. pH has one comparatively high value (9.36) that's nowhere close to the next-highest value. We can remove that row - it's missing 4 other variables. PH at that level isn't impossible in beverage manufacturing, but with 4 missing predictor values in the same row and the value isolated far from the rest of the distribution, it reads more like a data entry issue than a legitimate measurement to learn from. Other outlier values are one of several similar values, and could be categorized that way due to the shape of the distribution and wide range of values. For example, it looks like there's one particularly high value for Oxygen.Filler, but when we check there are 5 cases with the same value.
+Cross-checking the graphs with the data set, we could remove the one `Filler.Level` value that appears on the top of the box plot, 161.2 when the next-highest is 154. pH has one comparatively high value (9.36) that's nowhere close to the next-highest value. We can remove that row since it's missing 4 other variables. PH at that level isn't "impossible" here, but with 4 missing predictor values in the same row and the value isolated far from the rest of the distribution, it seems more like a data entry issue than a real measurement we want to be using. Other outlier values are not one-offs, but instead there are a handful of data points at the high/low potential outlier values, so we're leaving the other alone. (For example, it looks like there's one particularly high value for `Oxygen.Filler`, but ther when we double checked, there 5 cases with the same value. Some light notes on that are written below.)
 
 ```{r remove-outliers}
 #removing the one outliers
@@ -436,21 +440,21 @@ test_data_new %>% count(Brand.Code)
 
 ```
 
-Oxygen filler shows up again with a few outliers, which just seems to be the case for this variable; the outliers in filler speed are all clustered; filler level has outliers on both ends, as does fill pressure. Carb.pressure1 has one high value, PSC.CO2 has a few higher values designated outliers due to the clustering on the lower end, same is true for PSC.Fill, and the rest are similar.
+`Oxygen.Filler` shows up again with a few outliers, which just seems to be the case for this variable; the outliers in filler speed are all clustered; filler level has outliers on both ends, as does fill pressure. `Carb.Pressure1` has one high value, `PSC.CO2` has a few higher values designated outliers due to the clustering on the lower end, same is true for `PSC.Fill`, and the rest are similar.
 
 We won't remove any of these because they don't look like errors, and in some cases represent a different, smaller cluster of values.
 
 ### Keeping a wider feature set for tree-based models
 
-The correlation prune above takes us to 20 predictors, which is the right call for linear models, PLS, penalized regression, and neural networks. Kuhn and Johnson notes that neural network models can be hurt by high correlation among the predictors. Tree-based models tolerate collinearity fine, as discussed in the regression trees coverage in Kuhn and Johnson.
+The correlation prune above takes us to 20 predictors. This "pruned" or "narrowed" set is what we can use for linear models, PLS, penalized regression, and neural networks. However, when it comes to Tree-based models, we know that those are okay with collinearity fine, so they will be give the "unpruned" or "wider" set of predictors.
 
-So we keep both:
+So:
 
-- `training_data_new` / `test_data_new`: 20 predictors after NZV removal and r > 0.90 correlation prune. Linear models, PLS, ridge / lasso / elastic net, and neural networks use this.
-- `training_data_wide` / `test_data_wide`: 31 predictors after just NZV removal. Random forest, gradient boosting, Cubist use this. The correlated-but-distinct sensor readings may each carry small bits of information a tree can exploit independently.
+- `training_data_new` / `test_data_new`: 20 predictors after Near-zero-variance (NZV) removal and r > 0.90 correlation prune. For use with linear models, PLS, ridge / lasso / elastic net, and neural networks.
+- `training_data_wide` / `test_data_wide`: 31 predictors after just NZV removal. For use with Random forest, gradient boosting, Cubist (if we ever use Cubist). 
 
 ```{r wide-feature-set}
-# wide feature set: post-NZV only, same outlier filters as the narrow set
+# wide feature set: still did NZV removal, plus has the same outlier filters as the narrow set
 training_data_wide <- training_data %>%
   select(-Hyd.Pressure1) %>%
   filter(PH < 9 | is.na(PH)) %>%
@@ -467,11 +471,13 @@ test_data_wide <- test_data %>%
 ### Recap
 
 - Dropped `Hyd.Pressure1` for near-zero variance
-- Dropped 11 collinear variables (cutoff r > 0.90), keeping one representative per correlated group; manually chose `MFR` over `Filler.Speed` since `MFR` had more missingness
-- Outlier check via IQR + histograms + boxplots: removed two rows only (one with `PH = 9.36`, one with `Filler.Level = 161.2`). Everything else looked like a legitimate value or part of a cluster
-- Removed rows with missing `PH` since we can't impute the response
-- Narrow training set has 21 columns (20 predictors + `PH`), still pending imputation
-- Also derived a wider feature set (`training_data_wide_no_na`, 31 predictors) by skipping the correlation prune, for tree-based models that handle collinearity natively
+- Dropped 11 collinear variables (with the cutoff r > 0.90), keeping one representative predictor per each correlated group of predictors.
+  - Also we manually chose to drop `MFR` instead of `Filler.Speed`, since `MFR` had more missingness and would have been less reliable to keep.
+- Checked for outliers using IQR + histograms + boxplots
+  - Removed two rows only (one with `PH = 9.36`, one with `Filler.Level = 161.2`). Everything else looked liked like legitimate data.
+- Removed rows with missing `PH` from the training data since we can't impute the response
+- Narrow training set has 21 columns (20 predictors + `PH`)
+- Also derived a wider feature set (`training_data_wide_no_na`, 31 predictors) by skipping the correlation prune, for tree-based models that are fine with there being collinearity 
 
 ## Dealing with missing values
 
@@ -486,9 +492,13 @@ table(rowSums(is.na(training_data_no_na)))
 
 ```
 
-516 missing values across 2566 cases and 21 variables  - 516/53886 is about .9% overall missingness, which is very low. Notably, brand code is missing in 120 cases.
+516 missing values across 2566 cases and 21 variables. This means 516/53886 is about .9% overall missingness, which is very low. Worth noting, brand code is missing in 120 cases.
 
-2169 cases our of 2566 are complete, or about 85%. If we dropped all NAs, we would be dropping 15% of the data. Instead, we will use the VIM package for simple KNN imputation. This package just fills in the nearest neighbor--it doesn't change the other variables. Vim can handle categorical variables, like brand code. We'll use K=5.
+2169 cases our of 2566 are complete, or about 85%. If we dropped all NAs, we would be dropping 15% of the data. So instead, we'll be using imputation.
+
+**However!** the imputation we're doing here is mostly an inspection step, plus `test_data_imputed` gets used by the eval prediction chunk much later in our worflow, and that's only if narrow-set model wins (like a linear model). In our actual model training, we're going to let `caret` do the imputation per CV fold to avoid data leakage.
+
+Now for `test_data_imputed`, we're using `VIM` package for simple KNN imputation. This package just fills in the nearest neighbor; it doesn't change the other variables. Vim can handle categorical variables, like brand code.
 
 ```{r impute-training}
 
@@ -516,10 +526,10 @@ sum(is.na(test_data_new)) - 267
 
 Now there are only 60 missing values total. 42 rows have missing values. One row has 8 missing values (the one that had 14 before).
 
-Imputing a row that sparse means the filled-in predictor values will be noisy, but the deliverable expects a prediction for every row in the evaluation set. We're keeping the row in and flagging the prediction as low-confidence rather than dropping it.
+Imputing a row that sparse means the filled-in predictor values will be pretty noisy, but the deliverable expects a prediction for every row in the evaluation set. For that reason, we're opting to keep the row in and make a note that the prediction is low-confidence, but we aren't going to drop the row.
 
 ```{r eval-row-count}
-#keeping all 267 rows; the sparse row gets imputed but its prediction is flagged downstream
+#keeping all 267 rows
 count(test_data_new)
 ```
 
@@ -538,15 +548,17 @@ sum(is.na(test_data_imputed))
 
 ### Recap
 
-- Training set started with 516 missing cells across 2566 rows x 21 columns (~0.9% missingness). Imputed all gaps with VIM `kNN(k = 5)` -> `training_data_imputed`
-- Evaluation set: kept all 267 rows including one with 8 predictor NAs out of 20 (originally 14 before column drops); imputed predictor columns only with VIM `kNN(k = 5)` (leaving `PH` blank since that's what we predict) -> `test_data_imputed`. The sparse row gets imputed too but will be flagged as low-confidence in the final prediction output.
+- Training set started with 516 missing cells across 2566 rows and 21 columns (about 0.9% missingness). Imputed the gaps with VIM and `kNN(k = 5)` to get `training_data_imputed`
+- Evaluation set: 
+  - kept all 267 rows including one with 8 predictor NAs out of 20 (originally 14 before column drops)
+  - imputed predictor columns only with VIM and `kNN(k = 5)` to get `test_data_imputed`. The sparse row gets imputed too but we're flgging this as a low-confidence prediction.
 - Both sets are now fully imputed (apart from `PH` in the eval set) and ready for modeling
 
 ## Break into training and test data (inspection only, not used downstream)
 
 > Recap located at the end of the section. Skip there to jump past the code/workflow.
 
-Originally this section produced an 80/20 split for a quick sanity check on the data. The modeling pipeline below uses 10-fold CV on the full `training_data_no_na` instead, so the `train_x` / `test_x` objects below aren't downstream of anything. The chunk is set to `eval=FALSE` so it doesn't run on knit, but the code is kept here as a historical reference.
+Originally we made this section to produce an 80/20 split for a quick sanity check on the data. When we updated our modeling pipeline to use 10-fold CV on the full `training_data_no_na` data instead, it meant that we weren't using these `train_x` / `test_x` objects downstream anymore. For that reason, the chunk is set to `eval=FALSE` so it doesn't run on knit, but we wanted to keep the code here both for reference, and for the option to revert if we want to.
 
 ```{r train-test-split, eval=FALSE}
 set.seed(624)
@@ -565,75 +577,81 @@ test_x  <- training_data_imputed[-train_index, ] %>% dplyr::select(-PH)
 
 ### Centering and scaling
 
-I did not scale anything individually, every package should have an option to center/scale automatically, and use a Box-Cox for the data with less normal distributions.
+We didn't scale anything individually in this section, since every package should have an option to center/scale automatically, and use a Box-Cox for the data with less normal distributions.
 
 ### Recap
 
 - The 80/20 split chunk above is `eval=FALSE` and is kept only as a historical reference. The modeling pipeline uses 10-fold CV on `training_data_no_na` directly, so `train_x` / `test_x` etc. are not created on knit.
-- Centering, scaling, and Box-Cox transformations are handled inside each model's `preProc` options rather than baked in here.
+- Centering, scaling, and Box-Cox transformations are handled inside each model's `preProc` options rather than included in here.
 
 ## Modeling approach
 
 > Recap located at the end of the section. Skip there to jump past the workflow.
 
-Before fitting models, a few setup decisions worth flagging up front.
+Before fitting models, here are a few setup decisions that we wanted to have at the top of this section.
 
-**`caret` rather than `recipes`.** The textbook for this part of the course (Kuhn and Johnson) uses `caret::preProcess` for imputation, transformations, and scaling inside the resampling loop. We're sticking with that for the sake of sticking with the class standard and what we've been learning how to use effectively. However we did stumble upon the `recipes` made by the same author later. Potentially worth looking into in the future.
+**`caret`** In class and in Kuhn and Johnson, we used `caret::preProcess` for imputation, transformations, and scaling inside the resampling loop. We're sticking with that for the sake of sticking with the class standard and what we've been learning how to use effectively. However we did stumble upon the `recipes` package made by the same author later. Potentially worth looking into in the future.
 
-**Per-model feature sets.** As covered in the data cleaning section, linear-family and neural-network models use the correlation-pruned 20-predictor set (`training_data_no_na`). Tree-based and rule-based models use the wider 31-predictor set (`training_data_wide_no_na`). The reasoning is in the cleaning section's notes.
+**Per-model feature sets.** We know we discussed this in the previosu section but saying again. Linear and neural network models use the correlation-pruned 20-predictor set (`training_data_no_na`). Tree-based and rule-based models (where collinearity is fine) use the wider 31-predictor set (`training_data_wide_no_na`).
 
-**Imputation inside resampling.** The earlier `kNN(k = 5)` chunk produced `training_data_imputed` as a one-time inspection step, useful for seeing what imputation does to the data and for the quick 80/20 sanity-check split. For the actual model fitting, however, we start from `training_data_no_na` (the pre-imputation intermediate) and let caret handle imputation inside each CV fold via `preProcess(method = c("YeoJohnson", "center", "scale", "knnImpute"))` paired with `trainControl(method = "cv", number = 10)`. That way the imputation parameters are estimated per fold rather than once on the full training set, which avoids the small bias from imputing before the split.
+**Imputation inside resampling.** For model fitting, we're starting from `training_data_no_na` (which has not been imputed) and we're letting caret handle imputation inside each CV. 
 
-**Brand.Code handling.** Rather than imputing the 120 missing brand values, we treat missing as its own factor level called `"Unknown"`. The EDA section established that the missing-Brand rows have a different PH profile from known-Brand rows, so the missingness itself carries signal worth preserving.
+* `preProcess(method = c("YeoJohnson", "center", "scale", "knnImpute"))` 
+* `trainControl(method = "cv", number = 10)`. 
 
-**Shared infrastructure for the model comparison.** Every model we fit shares the same `controlObject` (10-fold CV) and is trained immediately after `set.seed(624)`. Together that guarantees identical CV folds across models, which is what `resamples()` requires for valid side-by-side comparisons later. Each fitted model also gets appended to a `models` list so the final comparison can drop in cleanly.
+We did this so that the imputation parameters are estimated per fold rather than once on the full training set, which avoids bias or data leakage from imputing before the split.
+
+**Brand.Code handling.** Rather than imputing the 120 missing brand values, we opted to treat missing as its own factor level called `"Unknown"`. In our EDA section, we saw that the rows missing a brand did have a bit of a different PH profile from known-Brand rows, so we're treating the missingness itself carries signal worth preserving.
+
+**Shared infrastructure for the model comparison.** Every model we fit shares the same `controlObject` (10-fold CV) and is trained immediately after `set.seed(624)`. This way, we're getting the same CV folds across models, which is what `resamples()` requires for side-by-side comparisons of the models at the end. Each fitted model also gets appended to a `models` list along the way.
 
 ```{r setup-modeling}
-library(caret)
-
 set.seed(624)
 
-# treat Brand.Code NAs as their own factor level (informative-missingness signal from EDA)
+# treating Brand.Code NAs as their own factor level (I guess this is called informative-missingness)
 training_for_modeling <- training_data_no_na %>%
   mutate(Brand.Code = factor(ifelse(is.na(Brand.Code) | Brand.Code == "", "Unknown", Brand.Code)))
 
-# shared control object for every model. Sharing this AND seeding with set.seed(624)
-# right before each train() call keeps the CV folds identical across models.
+# shared control object for every model. 
+# We're using this object= and using set.seed(624) right before each train() call 
+# This way we can compare our CV folds to one another
 controlObject <- trainControl(method = "cv", number = 10,
                               savePredictions = "final")
 
-# named list to accumulate fitted models for the final resamples() comparison
+# simple list to accumulate fitted models.
+# goal was to make the resamples() comparison at the end easy
 models <- list()
 
-# running table of CV metrics; each model section appends one row after fitting
+# made a running table of CV metrics
+# the set up is each model section appends one row after fitting
 model_metrics <- tibble(model = character(),
                         cv_RMSE = numeric(),
                         cv_Rsquared = numeric(),
                         cv_MAE = numeric())
 ```
 
-**Per-model output pattern.** To keep model sections comparable across the rest of this report, each one produces the same chunks in the same order. Teammates adding a new model should follow this pattern:
+**Per-model output pattern.** To keep model sections comparable across the rest of this report, each one produces the same chunks in the same order. Anyone adding a new model, here's the pattern we're using:
 
-1. Train the model with `set.seed(624)` and the shared `controlObject`. Print the trained object so caret shows CV RMSE / R-squared / MAE. Append `getTrainPerf(model)` to `model_metrics` so the final comparison table builds itself.
-2. `plot(varImp(model), top = 20)`: which predictors matter most.
-3. *Linear-family only:* a coefficient table sorted by absolute t-statistic (gives direction + strength of each predictor's effect on PH). Tree-based and rule-based models skip this.
-4. A small residual summary table (mean, SD, max |residual|, plus predicted vs observed range so we can see range compression).
+1. Train the model with `set.seed(624)` and the shared `controlObject`. Print the trained object so caret shows CV RMSE / R-squared / MAE. Append `getTrainPerf(model)` to `model_metrics` to add to the final comparison table for the end.
+2. `plot(varImp(model), top = 20)`: to get predictors matter most.
+3. *Linear only:* we're looking at a coefficient table sorted by absolute t-statistic becuase it gives direction and strength of each predictor's effect on PH. We're skipping this for tree-based and rule-based models.
+4. A small residual summary table (mean, SD, max residual, plus predicted vs observed range).
 
 ### Recap
 
-- Linear-family + NN models get the 20-predictor narrow set; tree-based + rule-based models get the 31-predictor wide set.
-- The pre-imputed `training_data_imputed` is an inspection / sanity-check artifact for imputation. The actual model fitting starts from the pre-imputation data (`training_data_no_na`) and lets caret impute inside each CV fold for honest performance metrics.
-- Brand.Code missing values kept as an "Unknown" factor level rather than imputed.
-- All models share `controlObject` and are trained after `set.seed(624)`; together this guarantees identical CV folds, which is what `resamples()` needs for valid model comparison later.
+- Linear-family + NN models are using the 20-predictor narrow set. Tree-based + rule-based models are using the 31-predictor wide set.
+- The pre-imputed `training_data_imputed` is an inspection / sanity-check artifact for imputation. The actual model fitting startswith data that has not been imputed yet (`training_data_no_na`) and lets caret impute inside each CV fold to avoid data leakage.
+- `Brand.Code` missing values have been kept as an "Unknown" factor level rather than imputed.
+- All models share `controlObject` and are trained after `set.seed(624)`. This was so the CV folds would be the same for all models, which is what `resamples()` needs to compare the models at the end.
 - Per-model output pattern is documented above; each section appends one row to `model_metrics` so the final comparison table builds itself as we go.
 
 ## Linear baseline
 
 > Recap located at the end of the section. Skip there to jump past the code/workflow.
 
-First model: ordinary linear regression. Mostly useful as a floor for later models to beat.
+First model: ordinary linear regression. Mostly useful as a baseling for other models to beat.
 
-**Numeric pre-processing.** Inside the `train()` call, we use YeoJohnson rather than Box-Cox because four predictors in the narrow set (`Mnf.Flow`, `Hyd.Pressure2`, `PSC.Fill`, `PSC.CO2`) have non-positive values. Box-Cox would silently skip those columns; YeoJohnson handles the full real line. After YeoJohnson, predictors are centered, scaled, and KNN-imputed inside each CV fold.
+**Numeric pre-processing.** Inside the `train()` call, we're using YeoJohnson rather than Box-Cox because four predictors in the narrow set (`Mnf.Flow`, `Hyd.Pressure2`, `PSC.Fill`, `PSC.CO2`) had non-positive values. YeoJohnson is able to handle that data. After YeoJohnson, predictors are centered, scaled, and KNN-imputed inside each CV fold.
 
 ### Linear regression (lm)
 
@@ -664,13 +682,13 @@ model_metrics <- bind_rows(
 lm_model
 ```
 
-**Variable importance.** Which predictors matter most for PH under linear assumptions.
+**Variable importance.** Which predictors matter most for pH under linear assumptions.
 
 ```{r lm-varimp}
 plot(varImp(lm_model), top = 20)
 ```
 
-**Coefficients.** Sign and magnitude give direction and strength of each predictor's effect on PH (positive coefficient = predictor increases PH, negative = decreases PH). Sorted by absolute t-statistic.
+**Coefficients.** Each coefficient tells us how a predictor moves pH: positive pushes pH up, negative pushes it down, and bigger magnitudes mean stronger effects. Sorted by absolute t-statistic. (The t-statistic is used to sort by becuase it ranks the predictors by how confidently we can say their effect is real).
 
 ```{r lm-coefficients}
 lm_coefs <- summary(lm_model$finalModel)$coefficients %>%
@@ -680,7 +698,7 @@ lm_coefs <- summary(lm_model$finalModel)$coefficients %>%
 kable(lm_coefs, digits = 4)
 ```
 
-**Residual summary.** Out-of-fold residual stats and a quick check on how well predicted values cover the observed PH range.
+**Residual summary.** A quick look at how big the model's errors are (using out-of-fold predictions) and how well its predictions cover the observed pH range.
 
 ```{r lm-residuals}
 lm_preds <- lm_model$pred
@@ -709,11 +727,11 @@ kable(residual_summary)
 
 ### Recap
 
-- Linear regression baseline trained via 10-fold CV. Fitted model stored in `models$lm`, CV metrics appended to `model_metrics`.
-- Cross-validated RMSE ~0.135, R-squared ~0.38, MAE ~0.106. Residuals are mean-zero and uncorrelated with predicted values; the model is well-calibrated for what it can do.
-- Predicted PH range (8.24 to 8.83) is much narrower than observed (7.88 to 8.94). The linear model regresses to the mean and can't reach the tails of the PH distribution; nonlinear models should improve on this.
-- Top predictive factors (largest absolute t-statistics): `Mnf.Flow` (dominant), `Carb.Pressure1`, `Brand.CodeD`, `Filler.Level`, `Brand.CodeC`, `Usage.cont`, `Hyd.Pressure2`, `Temperature`.
-- Coefficient directions for business interpretation: higher `Mnf.Flow`, `Usage.cont`, `Temperature`, and `Oxygen.Filler` push PH down; higher `Carb.Pressure1`, `Filler.Level`, and `Hyd.Pressure2` push PH up. Brand D has the highest baseline PH, Brand C the lowest, with a spread of about 0.07 PH units between them.
+- Fit linear regression with 10-fold CV. The fitted model lives in `models$lm`, and the CV metrics got appended to `model_metrics`.
+- Cross-validated RMSE about 0.135, R-squared about 0.38, MAE about 0.106. The residuals look pretty well behaved (mean-zero, basically uncorrelated with the predicted values), so the model is doing about as well as a linear approach can on this data.
+- The predicted pH values span 8.24 to 8.83, while the actual observed pH values span 7.88 to 8.94. So the linear model can't quite reach the extremes; it leans toward predicting middle-ish values when the truth is at the edges. Nonlinear models should do better on that.
+- Top predictive factors (sorted by absolute t-statistic): `Mnf.Flow` is the dominant one, then `Carb.Pressure1`, `Brand.CodeD`, `Filler.Level`, `Brand.CodeC`, `Usage.cont`, `Hyd.Pressure2`, and `Temperature`.
+- For the business-side interpretation: higher `Mnf.Flow`, `Usage.cont`, `Temperature`, and `Oxygen.Filler` are associated with pushing pH down. Higher `Carb.Pressure1`, `Filler.Level`, and `Hyd.Pressure2` are associated with pushing pH up. Brand D has the highest baseline pH, Brand C has the lowest, with a spread of about 0.07 pH units between them.
 
 ## Elastic net
 
@@ -800,11 +818,11 @@ kable(residual_summary_elastic)
 
 ### Recap
 
-- Elastic net trained via 10-fold CV, with caret tuning over alpha (0 = ridge, 1 = lasso) and lambda. Fitted model stored in `models$elastic_net`, CV metrics appended to `model_metrics`.
-- Tuned to alpha = 0.2 (mostly ridge with a sliver of lasso) and lambda = 0.0010 (very small). The data didn't want much regularization at all; elastic net essentially landed on "lm with a faint ridge nudge."
-- CV metrics are nearly identical to lm: RMSE ~0.1354, R-squared ~0.381, MAE ~0.106. The penalized linear family has hit its ceiling on this dataset.
-- Same top predictors in the same order as lm, with coefficients shrunk slightly toward zero. Only `Carb.Pressure` got zeroed out by the lasso component (in lm it had p = 0.96 and a near-zero estimate, so this is the right call).
-- Same range compression as lm (predicted 8.24-8.82 vs observed 7.88-8.94). The linear ceiling is real; we need a nonlinear method to improve. Tree-based next.
+- Fit elastic net with 10-fold CV, letting caret tune over alpha (0 = ridge, 1 = lasso) and lambda. The fitted model lives in `models$elastic_net`, with CV metrics appended to `model_metrics`.
+- The tuner landed at alpha = 0.2 (mostly ridge with a sliver of lasso) and lambda = 0.0010, which is very small. Basically the data didn't want much regularization at all; elastic net pretty much settled on "lm with a faint ridge nudge".
+- CV metrics came in nearly identical to lm: RMSE about 0.1354, R-squared about 0.381, MAE about 0.106. The penalized linear family probably can't do much better than this on our dataset.
+- Same top predictors in the same order as lm, with coefficients shrunk slightly toward zero. Only `Carb.Pressure` got zeroed out by the lasso component (in lm it had p = 0.96 and a near-zero estimate, so this seemed like the right call).
+- Same range compression as lm (predicted 8.24-8.82 vs observed 7.88-8.94). The linear ceiling looks real. Going to need a nonlinear method to improve from here. Tree-based is up next.
 
 ## Random forest
 
@@ -889,7 +907,7 @@ kable(residual_summary_rf)
 - Random forest trained via 10-fold CV, on the wider 31-predictor feature set. Fitted model stored in `models$random_forest`, CV metrics appended to `model_metrics`.
 - Tuned `mtry = 26` (out of candidates 2, 10, 18, 26, 34). caret's default heuristic for regression is `p/3` (about 11 for our wider set), so the data preferred sampling more predictors per split than the default. Performance was nearly flat between mtry = 26 and 34.
 - CV metrics: RMSE 0.0926, R-squared 0.7177, MAE 0.0672. About a third off the linear-family RMSE and nearly doubling R-squared.
-- Top predictive factors: Brand.CodeC (100) and Mnf.Flow (99) nearly tied at the top, then Pressure.Vacuum (72), Oxygen.Filler (72), Air.Pressurer (61), Alch.Rel (60), Balling.Lvl (57), Temperature (52). Several of these (Pressure.Vacuum, Alch.Rel, Balling.Lvl, Carb.Rel) were dropped from the narrow set during the correlation prune, so the wider feature set is doing real work.
+- Top predictive factors: Brand.CodeC (100) and Mnf.Flow (99) nearly tied at the top, then Pressure.Vacuum (72), Oxygen.Filler (72), Air.Pressurer (61), Alch.Rel (60), Balling.Lvl (57), Temperature (52). Several of these (Pressure.Vacuum, Alch.Rel, Balling.Lvl, Carb.Rel) were dropped from the narrow set during the correlation prune, so the wider feature set definiyely created more opportunity here.
 - Random forest's predictions span PH values from 8.11 to 8.83, wider than the linear models did (8.24 to 8.83). The actual observed PH values span 7.88 to 8.94, wider still. So random forest gets closer to the extreme PH values than the linear models, but it still can't quite reach them; it leans toward predicting middle-of-the-pack values when the truth is at the edges.
 - There's a small systematic pattern in random forest's errors: when the model predicts a higher PH, the truth tends to be even higher; when it predicts a lower PH, the truth tends to be even lower. The correlation between predicted and error is 0.169, small but not zero. Same idea as the range-issue above (the model leans toward middle predictions), just less severe than what the linear models showed.
 
@@ -965,11 +983,11 @@ kable(residual_summary_gbm)
 
 ### Recap
 
-- Gradient boosting trained via 10-fold CV on the wider 31-predictor feature set. Fitted model stored in `models$gbm`, CV metrics appended to `model_metrics`.
-- We tuned gradient boosting (gbm) by testing combinations of tree depth (1 through 5) and number of trees (50 through 250). The best combination turned out to be the largest values we tested: depth 5 and 250 trees. Performance was still improving as we increased both, meaning gradient boosting might have done even better if we had tested even bigger settings. We didn't expand the search though, because even at these settings gradient boosting did not perform as well as random forest, and the gap was too large for a wider search to close.
+- Fit gradient boosting (gbm) with 10-fold CV on the wider 31-predictor feature set. The fitted model lives in `models$gbm`, with CV metrics appended to `model_metrics`.
+- We tuned gbm by testing combinations of tree depth (1 through 5) and number of trees (50 through 250). The best combination turned out to be the biggest values we tested: depth 5 and 250 trees. Performance was still improving as we increased both, so gbm might have done even better if we had tested bigger settings. We didn't bother to expand the search though, since even at these settings gbm did not perform as well as random forest, and the gap was too large for a wider search to realistically close.
 - CV metrics: RMSE 0.1073, R-squared 0.6118, MAE 0.0810. Better than the linear family but notably behind random forest.
-- Top predictive factors are mostly the same set as random forest in a different order: Mnf.Flow (100, top), Usage.cont (34), Brand.CodeC (33), Alch.Rel (31), Pressure.Vacuum (24), Temperature (23), Oxygen.Filler (22), Carb.Pressure1 (18). The Mnf.Flow + Brand + Pressure.Vacuum + Alch.Rel + Oxygen + Temperature cluster stays consistent with random forest.
-- Predicted PH range: 8.15 to 8.88 vs observed 7.88 to 8.94. Slightly wider than random forest (8.11 to 8.83) at the upper end. Residuals are nearly mean-zero and uncorrelated with predicted values (correlation 0.028), so gradient boosting is well-calibrated.
+- Top predictive factors are mostly the same set as random forest, just in a different order: `Mnf.Flow` (100, top), `Usage.cont` (34), `Brand.CodeC` (33), `Alch.Rel` (31), `Pressure.Vacuum` (24), `Temperature` (23), `Oxygen.Filler` (22), `Carb.Pressure1` (18). The `Mnf.Flow` + brand + `Pressure.Vacuum` + `Alch.Rel` + `Oxygen` + `Temperature` cluster stays consistent with random forest.
+- Predicted pH range: 8.15 to 8.88 vs observed 7.88 to 8.94. Slightly wider than random forest (8.11 to 8.83) at the upper end. Residuals are pretty much mean-zero and uncorrelated with predicted values (correlation 0.028), so gbm is well-calibrated.
 
 ## Support vector machine (radial kernel)
 
@@ -1042,11 +1060,11 @@ kable(residual_summary_svm)
 
 ### Recap
 
-- SVM-radial trained via 10-fold CV on the narrow 20-predictor feature set with full preProcess pipeline (YeoJohnson, center, scale, knnImpute). Fitted model stored in `models$svm_radial`, CV metrics appended to `model_metrics`.
-- Support vector machine (SVM) has a parameter called C that controls how complex the model gets. We tested C values from 0.25 to 128 (each one twice as big as the last). The best C turned out to be 2, which sits in the middle of the values we tested. That's a good sign: if the best C had been at either extreme of the range, we'd worry we didn't search wide enough. Sigma (the parameter that controls the radial kernel) was held constant at 0.028.
+- Fit SVM-radial with 10-fold CV on the narrow 20-predictor feature set with the full preProcess pipeline (YeoJohnson, center, scale, knnImpute). The fitted model lives in `models$svm_radial`, with CV metrics appended to `model_metrics`.
+- Support vector machine (SVM) has a parameter called C that controls how complex the model gets. We tested C values from 0.25 to 128 (each one twice as big as the last). The best C turned out to be 2, which is in the middle of the values we tested. That's a good sign; if the best C had been at either extreme of the range, we'd worry we didn't search wide enough. Sigma (the parameter that controls the radial kernel) was held constant at 0.028.
 - CV metrics: RMSE 0.1228, R-squared 0.4944, MAE 0.0920. Between the linear models and the tree-based models. The radial kernel (which lets SVM fit curved relationships instead of just straight lines) gets it past the linear models, but SVM is a single model while random forest and gradient boosting each combine many trees, which is the main reason those two outperform SVM here.
-- Top predictive factors via LOESS pseudo-R-squared (SVM's filter-based importance, not native): Mnf.Flow (100), Usage.cont (92), Oxygen.Filler (87), Filler.Level (66), Filler.Speed (61), PC.Volume (47), Hyd.Pressure2 (44), Fill.Pressure (43), Brand.Code (31), Carb.Pressure1 (30). Note this measures individual predictor strength against PH, not contribution to the SVM model itself.
-- Predicted PH range: 8.18 to 8.86 vs observed 7.88 to 8.94. Similar compression pattern to the other models. Mean residual is slightly off zero (-0.0079), a touch more than the other models but not enough to suggest systematic bias.
+- Top predictive factors via LOESS pseudo-R-squared (this is SVM's filter-based importance, not a native one): `Mnf.Flow` (100), `Usage.cont` (92), `Oxygen.Filler` (87), `Filler.Level` (66), `Filler.Speed` (61), `PC.Volume` (47), `Hyd.Pressure2` (44), `Fill.Pressure` (43), `Brand.Code` (31), `Carb.Pressure1` (30). Worth noting this measures individual predictor strength against pH, not contribution to the SVM model itself.
+- Predicted pH range: 8.18 to 8.86 vs observed 7.88 to 8.94. Similar compression pattern to the other models. Mean residual is a touch off zero (-0.0079), slightly more than the other models but not enough to suggest systematic bias.
 
 ## Model comparison
 
@@ -1074,10 +1092,10 @@ kable(model_metrics %>% arrange(cv_RMSE))
 
 - Five models trained: linear regression (lm), elastic net, random forest (RF), gradient boosting (gbm), and support vector machine with radial kernel (SVM-radial). Ranked by cross-validated RMSE: random forest (0.093) < gradient boosting (0.107) < SVM-radial (0.123) < elastic net (0.135) ~= linear regression (0.135).
 - **Random forest wins** with cross-validated RMSE 0.0926, R-squared 0.7177, MAE 0.0672. It cuts the linear-family RMSE by about a third and almost doubles R-squared.
-- Gradient boosting (gbm) comes in second (RMSE 0.107, R-squared 0.612). It performed better than the linear models and SVM-radial but did not match random forest. The tuning landed at the largest settings we tested, meaning gradient boosting might keep improving with more tuning room, but the gap to random forest is large enough that we did not pursue it further.
-- SVM-radial sits between the linear and tree-based models (RMSE 0.123, R-squared 0.494). The radial kernel lets it fit curved relationships, which helps over the linear models. But SVM-radial is a single model while random forest and gradient boosting each combine many trees into one prediction, which is the main reason those tree-based methods outperform SVM-radial here.
-- Linear regression (lm) and elastic net are essentially tied at the bottom (RMSE 0.135, R-squared 0.38). The linear family probably cannot improve further on this dataset; elastic net's tuning confirmed there's no useful coefficient shrinkage to extract beyond what plain linear regression already finds.
-- **Pick: random forest.** It's the clear leader, generalizes well, and provides strong variable importance for the business writeup.
+- Gradient boosting came in second (RMSE 0.107, R-squared 0.612). It did better than the linear models and SVM-radial, but didn't match random forest. The tuning landed at the largest settings we tested, so gbm might have kept improving with more tuning room, but the gap to random forest was large enough that we didn't bother to chase it further.
+- SVM-radial sits in between the linear and tree-based models (RMSE 0.123, R-squared 0.494). The radial kernel lets it fit curved relationships, which helps it do better than the linear models. But SVM-radial is a single model while random forest and gradient boosting each combine many trees into one prediction, which is probably the main reason those two outperform SVM-radial here.
+- Linear regression (lm) and elastic net are basically tied at the bottom (RMSE 0.135, R-squared 0.38). The linear family probably can't improve further on this dataset; elastic net's tuning confirmed there's no useful coefficient shrinkage to extract beyond what plain linear regression already finds.
+- **Picking random forest** as our final model. It's the clear leader, generalizes well, and gives us strong variable importance for the business writeup.
 
 ## Evaluation set predictions
 
@@ -1155,8 +1173,8 @@ head(predictions_output)
 
 ### Recap
 
-- Predictions for the evaluation set are written to `abc_beverage_PH_predictions.csv` in the project root. The output has four columns: `row_id`, `Brand.Code`, `predicted_PH`, and a `notes` column that flags rows where the original evaluation data had 5+ predictor NAs (these predictions lean heavily on imputed values).
-- The chunk picks the best model dynamically by lowest CV RMSE in `model_metrics`. Currently that's random forest.
+- Predictions for the evaluation set get written to `abc_beverage_PH_predictions.csv` in the project root. The output has four columns: `row_id`, `Brand.Code`, `predicted_PH`, and a `notes` column that flags rows where the original evaluation data had 5+ predictor NAs (since those predictions lean heavily on imputed values).
+- The chunk picks the best model dynamically by lowest CV RMSE in `model_metrics`. Right now that's random forest.
 - Adding a new model in the future just means appending an entry to `model_feature_set` inside the chunk (narrow or wide); the chunk picks up whichever model has the lowest CV RMSE.
 
 ## Business takeaways (Informal)
@@ -1166,11 +1184,11 @@ The non-technical report needs these for ABC Beverage leadership:
 1. **The model.** Random forest is our chosen final model with cross-validated RMSE 0.093, R-squared 0.72, MAE 0.067. That's substantially better than the linear family (linear regression and elastic net both at RMSE 0.135, R-squared 0.38). Of the five models we tried, random forest was a clear leader; gradient boosting came in second but did not perform as well.
 2. **The factors.** Consistent themes across all five models:
    - `Mnf.Flow`: the single most predictive variable across every model. Lower flow correlates with higher PH.
-   - `Brand.Code`: a real driver. Random forest emphasizes Brand C (lowest baseline PH); linear models pick up Brand D too. Either way, the brand a beverage is made under has a measurable effect on PH.
-   - `Pressure.Vacuum`, `Alch.Rel`, `Balling.Lvl`, `Carb.Rel`, `Oxygen.Filler`: surface as important in the tree-based models. Several of these were dropped from the linear-family models due to collinearity, so they're "new" levers that pure linear analysis would have missed.
-   - `Temperature` and `Usage.cont`: appear at or near the top of every model.
-3. **The recommendation.** Tighter operational tolerances and sensor monitoring on the top 3-4 predictors (or you could call them levers); each brand should get its own production targets since `Brand.Code` is consistently one of the top predictors of PH (the right settings for Brand A probably aren't the right settings for Brand D). For our random-forest-driven recommendation specifically: focus on `Mnf.Flow`, `Brand.Code`-aware standards, `Pressure.Vacuum`, `Oxygen.Filler`, and `Alch.Rel`.
+   - `Brand.Code`: a real driver. Random forest emphasizes Brand C the most (the brand with the lowest baseline pH). Linear models give the strongest weight to Brand D instead, with C and B also significant. Either way, the brand a beverage is made under has a measurable effect on PH.
+   - `Pressure.Vacuum`, `Alch.Rel`, `Balling.Lvl`, `Carb.Rel`: surface as important in the tree-based models. These were dropped from the linear-family models due to collinearity, so they're "new" levers that pure linear analysis would have missed.
+   - `Temperature`, `Usage.cont`, and `Oxygen.Filler`: appear at or near the top of every model.
+3. **The recommendation.** Tighter operational tolerances and sensor monitoring on the top 4-5 predictors (or you could call them levers); each brand should get its own production targets since `Brand.Code` is consistently one of the top predictors of PH (the right settings for Brand A probably aren't the right settings for Brand D). For our random-forest-driven recommendation specifically: focus on `Mnf.Flow`, `Brand.Code`-aware standards, `Pressure.Vacuum`, `Oxygen.Filler`, and `Alch.Rel`.
 
 ### Recap
 
-- Fill in fully once the final model is determined
+- This is our working scratch pad for the executive doc. Random forest is our chosen final model and the factors / recommendation bullets above are the current draft. We'll keep iterating on the phrasing as we polish for the team's non-technical report.
