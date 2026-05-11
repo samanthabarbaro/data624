@@ -118,9 +118,11 @@ Both data sets have the same columns, so we can proceed.
 
 How many missing values are there? Are there any trends? How many complete cases are there?
 
-#### Test data
+#### Evaluation set (`test_data`)
 
-Count nulls/missing values in the test data:
+> Note: `test_data` here is the evaluation file used for the project deliverable. PH is intentionally blank in this file because that's what the model predicts. It's not a held-out test split from training.
+
+Count nulls/missing values in the evaluation set:
 
 ```{r}
 
@@ -128,9 +130,9 @@ sort(colSums(is.na(test_data)), decreasing = TRUE)
 
 ```
 
-First off, all the **pH values are missing**. This is not a test set —it's what we will predict. The training data will have to be split on its own into a training and test set.
+First off, all the **pH values are missing**. This is not a test set -it's what we will predict. The training data will have to be split on its own into a training and test set.
 
-Most columns are missing a few (under 10) values or none at all. MFR is missing the most values – 31 out of 267, or about 12%. Filler speed is next, missing only 10 values.
+Most columns are missing a few (under 10) values or none at all. MFR is missing the most values - 31 out of 267, or about 12%. Filler speed is next, missing only 10 values.
 
 Next, we'll look at the data row-wise and see if there are full or close-to-full missing cases.
 
@@ -200,8 +202,8 @@ The p-value is 0, which means the data most likely isn't missing completely at r
 
 - 2571 training cases, 267 evaluation cases, 33 columns in both
 - All `PH` values in the evaluation set are missing. That file is what we predict on, not a test set
-- Missingness concentrates in `MFR` (≈8% training, ≈12% eval), `Brand.Code` (≈5% training), and `Filler.Speed` (≈2% training); everything else under 2%
-- ~79% of training cases are complete; the MCAR test (`naniar::mcar_test`) returned p ≈ 0, so missingness isn't completely at random
+- Missingness concentrates in `MFR` (~8% training, ~12% eval), `Brand.Code` (~5% training), and `Filler.Speed` (~2% training); everything else under 2%
+- ~79% of training cases are complete; the MCAR test (`naniar::mcar_test`) returned p ~ 0, so missingness isn't completely at random
 
 ## Data cleaning
 
@@ -379,7 +381,7 @@ outliers <- sapply(training_data_new |> select(-Brand.Code), function(x) {
 outliers
 ```
 
-Cross-checking the graphs with the data set, we could remove the one Filler.Level value that appears on the top of the box plot, 161.2 when the next-highest is 154. pH has one comparatively high value (9.36) that's nowhere close to the next-highest value. We can remove that row - it's missing 4 other variables. Other outlier values are one of several similar values, and could be categorized that way due to the shape of the distribution and wide range of values. For example, it looks like there's one particularly high value for Oxygen.Filler, but when we check there are 5 cases with the same value.
+Cross-checking the graphs with the data set, we could remove the one Filler.Level value that appears on the top of the box plot, 161.2 when the next-highest is 154. pH has one comparatively high value (9.36) that's nowhere close to the next-highest value. We can remove that row - it's missing 4 other variables. PH at that level isn't impossible in beverage manufacturing, but with 4 missing predictor values in the same row and the value isolated far from the rest of the distribution, it reads more like a data entry issue than a legitimate measurement to learn from. Other outlier values are one of several similar values, and could be categorized that way due to the shape of the distribution and wide range of values. For example, it looks like there's one particularly high value for Oxygen.Filler, but when we check there are 5 cases with the same value.
 
 ```{r}
 #removing the one outliers
@@ -408,13 +410,38 @@ Oxygen filler shows up again with a few outliers, which just seems to be the cas
 
 We won't remove any of these because they don't look like errors, and in some cases represent a different, smaller cluster of values.
 
+### Keeping a wider feature set for tree-based models
+
+The correlation prune above takes us to 20 predictors, which is the right call for linear models, PLS, penalized regression, and neural networks. Kuhn and Johnson notes that neural network models can be hurt by high correlation among the predictors. Tree-based models tolerate collinearity fine, as discussed in the regression trees coverage in Kuhn and Johnson.
+
+So we keep both:
+
+- `training_data_new` / `test_data_new`: 20 predictors after NZV removal and r > 0.90 correlation prune. Linear models, PLS, ridge / lasso / elastic net, and neural networks use this.
+- `training_data_wide` / `test_data_wide`: 31 predictors after just NZV removal. Random forest, gradient boosting, Cubist use this. The correlated-but-distinct sensor readings may each carry small bits of information a tree can exploit independently.
+
+```{r}
+# wide feature set: post-NZV only, same outlier filters as the narrow set
+training_data_wide <- training_data |>
+  select(-Hyd.Pressure1) |>
+  filter(PH < 9 | is.na(PH)) |>
+  filter(Filler.Level < 160 | is.na(Filler.Level))
+
+training_data_wide_no_na <- training_data_wide |>
+  filter(!is.na(PH))
+
+# same column drop on the evaluation set
+test_data_wide <- test_data |>
+  select(-Hyd.Pressure1)
+```
+
 ### Recap
 
 - Dropped `Hyd.Pressure1` for near-zero variance
 - Dropped 11 collinear variables (cutoff r > 0.90), keeping one representative per correlated group; manually chose `MFR` over `Filler.Speed` since `MFR` had more missingness
 - Outlier check via IQR + histograms + boxplots: removed two rows only (one with `PH = 9.36`, one with `Filler.Level = 161.2`). Everything else looked like a legitimate value or part of a cluster
 - Removed rows with missing `PH` since we can't impute the response
-- Training data now has 21 columns (20 predictors + `PH`), still pending imputation
+- Narrow training set has 21 columns (20 predictors + `PH`), still pending imputation
+- Also derived a wider feature set (`training_data_wide_no_na`, 31 predictors) by skipping the correlation prune, for tree-based models that handle collinearity natively
 
 ## Dealing with missing values
 
@@ -431,7 +458,7 @@ table(rowSums(is.na(training_data_no_na)))
 
 516 missing values across 2566 cases and 21 variables  - 516/53886 is about .9% overall missingness, which is very low. Notably, brand code is missing in 120 cases.
 
-2169 cases our of 2566 are complete, or about 85%. If we dropped all NAs, we would be dropping 15% of the data. Instead, we will use the VIM package for simple KNN imputation. This package just fills in the nearest neighbor-–it doesn't change the other variables. Vim can handle categorical variables, like brand code. We'll use K=5.
+2169 cases our of 2566 are complete, or about 85%. If we dropped all NAs, we would be dropping 15% of the data. Instead, we will use the VIM package for simple KNN imputation. This package just fills in the nearest neighbor--it doesn't change the other variables. Vim can handle categorical variables, like brand code. We'll use K=5.
 
 ```{r}
 
@@ -442,9 +469,9 @@ sum(is.na(training_data_imputed))
 
 ```
 
-#### Imputing values for the test data
+#### Imputing values for the evaluation set
 
-First, let's check how many missing values there are after we've removed columns in the test data.
+First, let's check how many missing values there are after we've removed columns in the evaluation set.
 
 ```{r}
 
@@ -457,12 +484,12 @@ sum(is.na(test_data_new)) - 267
 
 ```
 
-Now there are only 60 missing values total. 42 rows have missing values. One row has 8 missing values (the one that had 14 before). Let's remove that:
+Now there are only 60 missing values total. 42 rows have missing values. One row has 8 missing values (the one that had 14 before).
+
+Imputing a row that sparse means the filled-in predictor values will be noisy, but the deliverable expects a prediction for every row in the evaluation set. We're keeping the row in and flagging the prediction as low-confidence rather than dropping it.
 
 ```{r}
-test_data_new <- test_data_new[rowSums(is.na(test_data_new)) != 9, ]
-
-#confirming that only one value was removed
+#keeping all 267 rows; the sparse row gets imputed but its prediction is flagged downstream
 count(test_data_new)
 ```
 
@@ -474,15 +501,15 @@ cols_to_impute <- setdiff(colnames(test_data_new), "PH")
 
 test_data_imputed <- kNN(test_data_new, variable = cols_to_impute, k = 5)
 
-#we should get 266 cases
+#we should get 267 cases
 sum(is.na(test_data_imputed))
 
 ```
 
 ### Recap
 
-- Training set started with 516 missing cells across 2566 rows × 21 columns (~0.9% missingness). Imputed all gaps with VIM `kNN(k = 5)` → `training_data_imputed`
-- Evaluation set: removed one row that had 8 predictor NAs (originally 14 before column drops), then imputed predictor columns only with VIM `kNN(k = 5)` (leaving `PH` blank since that's what we predict) → `test_data_imputed`
+- Training set started with 516 missing cells across 2566 rows x 21 columns (~0.9% missingness). Imputed all gaps with VIM `kNN(k = 5)` -> `training_data_imputed`
+- Evaluation set: kept all 267 rows including one with 8 predictor NAs out of 20 (originally 14 before column drops); imputed predictor columns only with VIM `kNN(k = 5)` (leaving `PH` blank since that's what we predict) -> `test_data_imputed`. The sparse row gets imputed too but will be flagged as low-confidence in the final prediction output.
 - Both sets are now fully imputed (apart from `PH` in the eval set) and ready for modeling
 
 ## Break into training and test data
@@ -514,3 +541,20 @@ I did not scale anything individually, every package should have an option to ce
 
 - Split `training_data_imputed` 80/20 via `sample()` with `set.seed(1122)`, producing `train_x` / `train_y` (80%) and `test_x` / `test_y` (20%)
 - Centering, scaling, and Box-Cox transformations left to per-model `preProc` options rather than baked in here
+
+## Modeling approach
+
+> Recap located at the end of the section. Skip there to jump past the workflow.
+
+Before fitting models, a few setup decisions worth flagging up front.
+
+**`caret` rather than `recipes`.** The textbook for this part of the course (Kuhn and Johnson) uses `caret::preProcess` for imputation, transformations, and scaling inside the resampling loop. We're sticking with that for the sake of sticking with the class standard and what we've been learning how to use effectively. However we did stumble upon the `recipes` made by the same author later. Potentially worth looking into in the future.
+
+**Per-model feature sets.** As covered in the data cleaning section, linear-family and neural-network models use the correlation-pruned 20-predictor set (`training_data_no_na`). Tree-based and rule-based models use the wider 31-predictor set (`training_data_wide_no_na`). The reasoning is in the cleaning section's notes.
+
+**Imputation inside resampling.** The earlier `kNN(k = 5)` chunk produced `training_data_imputed` as a one-time inspection step, useful for seeing what imputation does to the data and for the quick 80/20 sanity-check split. For the actual model fitting, however, we start from `training_data_no_na` (the pre-imputation intermediate) and let caret handle imputation inside each CV fold via `preProcess(method = c("knnImpute", "BoxCox", "center", "scale"))` paired with `trainControl(method = "repeatedcv", number = 10, repeats = 5)`. That way the imputation parameters are estimated per fold rather than once on the full training set, which avoids the small bias from imputing before the split.
+
+### Recap
+
+- Linear-family + NN models get the 20-predictor narrow set; tree-based + rule-based models get the 31-predictor wide set.
+- The pre-imputed `training_data_imputed` is an inspection / sanity-check artifact for imputation. The actual model fitting starts from the pre-imputation data (`training_data_no_na`) and lets caret impute inside each CV fold for honest performance metrics.
