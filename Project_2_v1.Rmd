@@ -3,16 +3,16 @@ title: "Project 2 Data 624"
 author: "Samantha Barbaro, Catherine Dube, Luis Hernandez"
 date: "2026-05-06"
 output:
-  pdf_document:
-    toc: true
-    toc_depth: 3
-    number_sections: true
   html_document:
     toc: true
     toc_float: true
     toc_depth: 3
     number_sections: true
     code_folding: hide
+  pdf_document:
+    toc: true
+    toc_depth: 3
+    number_sections: true
 ---
 
 # Project 2
@@ -186,11 +186,11 @@ Overall, 844 values are missing across the training set, about 1% of all cells. 
 
 ```{r, warning=FALSE}
 library(naniar)
-numeric_only <- training_data |>
+numeric_only <- training_data %>%
   select(-Brand.Code)
 
-numeric_only <- numeric_only |>
-  dplyr::select(where(is.numeric)) |>
+numeric_only <- numeric_only %>%
+  dplyr::select(where(is.numeric)) %>%
   mutate(across(everything(), as.double))
 
 mcar_test(numeric_only)
@@ -198,12 +198,37 @@ mcar_test(numeric_only)
 
 The p-value is 0, which means the data most likely isn't missing completely at random (there are patterns in the missing data).
 
+#### A closer look at Brand.Code missingness
+
+The training set has 120 rows where Brand.Code is blank (about 4.7% of cases). Before deciding how to handle them in modeling, we check whether those rows look different from the rest. If the missingness carries signal about PH, we should preserve it rather than impute it away.
+
+```{r}
+# How does PH look in rows where Brand.Code is missing vs known?
+training_data %>%
+  mutate(brand_missing = is.na(Brand.Code) | Brand.Code == "") %>%
+  filter(!is.na(PH)) %>%
+  group_by(brand_missing) %>%
+  summarise(
+    n = n(),
+    ph_mean = mean(PH),
+    ph_median = median(PH),
+    ph_sd = sd(PH),
+    ph_min = min(PH),
+    ph_max = max(PH)
+  )
+```
+
+Two visible differences. Missing-Brand rows have a mean PH about 0.06 units below known-Brand rows (8.49 vs 8.55), and a noticeably narrower PH range (8.12 to 8.88 vs 7.88 to 9.36). They cluster toward the middle of the distribution rather than the tails.
+
+That looks like what Kuhn and Johnson calls informative missingness: the absence of a Brand.Code value is itself associated with a specific PH pattern. Imputing the missing values into one of A/B/C/D would roll these rows into whichever brand the imputer picks, distorting that brand's signal and erasing the mean shift. The cleaner approach is to keep the missingness as its own level (`"Unknown"`) when we model.
+
 ### Recap
 
 - 2571 training cases, 267 evaluation cases, 33 columns in both
 - All `PH` values in the evaluation set are missing. That file is what we predict on, not a test set
 - Missingness concentrates in `MFR` (~8% training, ~12% eval), `Brand.Code` (~5% training), and `Filler.Speed` (~2% training); everything else under 2%
 - ~79% of training cases are complete; the MCAR test (`naniar::mcar_test`) returned p ~ 0, so missingness isn't completely at random
+- A closer look at Brand.Code's missingness shows the 120 missing-Brand rows have a slightly lower mean PH and a narrower PH range than known-Brand rows, so the missingness itself looks informative; we'll preserve it rather than impute when modeling
 
 ## Data cleaning
 
@@ -235,9 +260,9 @@ Hyd.Pressure1 has a near-zero variance, so we could eliminate that one.
 We'll create a correlation grid, so we can see actual correlation between variables. We'll also create a correlation plot and use findCorrelation from the caret package to find variables that have 90% or higher correlation.
 
 ```{r}
-correlation_grid <- training_data |> 
-  drop_na() |>
-  select(-Brand.Code) |>
+correlation_grid <- training_data %>% 
+  drop_na() %>%
+  select(-Brand.Code) %>%
   cor()
 
 correlation_grid <- as.data.frame(correlation_grid)
@@ -264,9 +289,9 @@ Here's a correlation plot so we can see all the positively and negatively correl
 ```{r}
 library(corrplot)
 
-grid <- training_data |> 
-  drop_na() |> 
-  select(-Brand.Code) |> 
+grid <- training_data %>% 
+  drop_na() %>% 
+  select(-Brand.Code) %>% 
   cor()
 
 corrplot(cor(grid),method = "square")
@@ -301,17 +326,17 @@ the findcorrelation function says to drop Filler.Speed instead of MFR. However, 
 
 ```{r}
 #removing the variable with NZV
-training_data_new <- training_data |>
+training_data_new <- training_data %>%
   select(-Hyd.Pressure1)
 
 #removing correlated variables
-training_data_new <- training_data_new |>
+training_data_new <- training_data_new %>%
   select(-Pressure.Setpoint, -MFR, -Hyd.Pressure3,
          -Pressure.Vacuum, -Hyd.Pressure4, -Bowl.Setpoint, -Carb.Rel, 
          -Balling, -Alch.Rel, - Balling.Lvl, - Density)
 
 #donig the same for the test set
-test_data_new <- test_data |>
+test_data_new <- test_data %>%
   select(-Hyd.Pressure1, -Pressure.Setpoint, -MFR, -Hyd.Pressure3,
          -Pressure.Vacuum, -Hyd.Pressure4, -Bowl.Setpoint, -Carb.Rel, 
          -Balling, -Alch.Rel, - Balling.Lvl, - Density)
@@ -337,15 +362,15 @@ Let's check histograms to see if anything stands out:
 
 ```{r, echo=FALSE, fig.width=20, fig.height=15}
 #all remaining variables (minus brand code) 
-training_data_new |>
-    pivot_longer(where(is.numeric)) |>
-  drop_na(value) |>
+training_data_new %>%
+    pivot_longer(where(is.numeric)) %>%
+  drop_na(value) %>%
     ggplot(aes(x = value)) +
     geom_histogram() +
     facet_wrap(~ name, scales = "free")
 
 
-training_data_new |> count(Brand.Code)
+training_data_new %>% count(Brand.Code)
 
 ```
 
@@ -372,7 +397,7 @@ for (col in names(training_data_new %>% select(-Brand.Code))) {
 Calculating the number of outliers in each column based on the IQR method
 
 ```{r}
-outliers <- sapply(training_data_new |> select(-Brand.Code), function(x) {
+outliers <- sapply(training_data_new %>% select(-Brand.Code), function(x) {
   Q1 <- quantile(x, 0.25, na.rm=TRUE)
   Q3 <- quantile(x, 0.75, na.rm=TRUE)
   IQR <- Q3 - Q1
@@ -385,12 +410,12 @@ Cross-checking the graphs with the data set, we could remove the one Filler.Leve
 
 ```{r}
 #removing the one outliers
-training_data_new <- training_data_new |>
-  filter(PH < 9 | is.na(PH)) |>
+training_data_new <- training_data_new %>%
+  filter(PH < 9 | is.na(PH)) %>%
   filter(Filler.Level < 160 | is.na(Filler.Level)) 
 
 #removing pH NAs because we shouldn't impute the response variable
-training_data_no_na <- training_data_new |> 
+training_data_no_na <- training_data_new %>% 
   filter(!is.na(PH))
 ```
 
@@ -402,7 +427,7 @@ for (col in names(test_data_new %>% select(-Brand.Code, -PH))) {
   boxplot(test_data_new[[col]], main=col)
 }
 
-test_data_new |> count(Brand.Code)
+test_data_new %>% count(Brand.Code)
 
 ```
 
@@ -421,16 +446,16 @@ So we keep both:
 
 ```{r}
 # wide feature set: post-NZV only, same outlier filters as the narrow set
-training_data_wide <- training_data |>
-  select(-Hyd.Pressure1) |>
-  filter(PH < 9 | is.na(PH)) |>
+training_data_wide <- training_data %>%
+  select(-Hyd.Pressure1) %>%
+  filter(PH < 9 | is.na(PH)) %>%
   filter(Filler.Level < 160 | is.na(Filler.Level))
 
-training_data_wide_no_na <- training_data_wide |>
+training_data_wide_no_na <- training_data_wide %>%
   filter(!is.na(PH))
 
 # same column drop on the evaluation set
-test_data_wide <- test_data |>
+test_data_wide <- test_data %>%
   select(-Hyd.Pressure1)
 ```
 
@@ -519,18 +544,18 @@ sum(is.na(test_data_imputed))
 Breaking the training data set into an 80%/20% training and test set:
 
 ```{r}
-set.seed(1122)
+set.seed(624)
 
 train_index <- sample(nrow(training_data_imputed),
                       0.8 * nrow(training_data_imputed))
 
 #create a training set
 train_y <- training_data_imputed$PH[train_index]
-train_x <- training_data_imputed[train_index, ] |> dplyr::select(-PH)
+train_x <- training_data_imputed[train_index, ] %>% dplyr::select(-PH)
 
 #test set
 test_y <- training_data_imputed$PH[-train_index]
-test_x  <- training_data_imputed[-train_index, ] |> dplyr::select(-PH)
+test_x  <- training_data_imputed[-train_index, ] %>% dplyr::select(-PH)
 ```
 
 ### Centering and scaling
@@ -539,7 +564,7 @@ I did not scale anything individually, every package should have an option to ce
 
 ### Recap
 
-- Split `training_data_imputed` 80/20 via `sample()` with `set.seed(1122)`, producing `train_x` / `train_y` (80%) and `test_x` / `test_y` (20%)
+- Split `training_data_imputed` 80/20 via `sample()` with `set.seed(624)`, producing `train_x` / `train_y` (80%) and `test_x` / `test_y` (20%)
 - Centering, scaling, and Box-Cox transformations left to per-model `preProc` options rather than baked in here
 
 ## Modeling approach
