@@ -1,0 +1,12 @@
+# Force LF line endings for text files across platforms.
+# Keeps diffs clean when contributors are on a mix of macOS/Linux and Windows.
+* text=auto eol=lf
+
+# Binary files: never normalize.
+*.pdf binary
+*.xlsx binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.zip binary

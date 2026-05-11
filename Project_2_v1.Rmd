@@ -3,13 +3,50 @@ title: "Project 2 Data 624"
 author: "Samantha Barbaro, Catherine Dube, Luis Hernandez"
 date: "2026-05-06"
 output:
-  pdf_document: default
-  html_document: default
+  pdf_document:
+    toc: true
+    toc_depth: 3
+    number_sections: true
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    number_sections: true
+    code_folding: hide
 ---
 
 # Project 2
 
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, 
+  out.width = "100%", 
+  fig.align = "center"
+)
+
+if(!require(pacman)) install.packages("pacman")
+pacman::p_load(
+   dplyr,
+   knitr, 
+   fpp3,
+   here,
+   tidyverse,
+   VIM,
+   naniar,
+   corrplot,
+   caret
+)
+
+projPath <- if (interactive()) {
+  dirname(rstudioapi::getSourceEditorContext()$path)
+} else {
+  here::here()
+}
+```
+
 ## Importing the data
+
+> Recap located at the end of the section. Skip there to jump past the code/workflow.
 
 ```{r}
 library(tidyverse)
@@ -28,7 +65,15 @@ str(training_data)
 
 All the rows with numbers are formatted as numbers. All the variables are numeric except for brand code, likely the only categorical variable.
 
+### Recap
+
+- Loaded the training and evaluation sets from the project GitHub repo
+- Inspected the structure with `glimpse()` and `str()`
+- All variables came in as numeric except `Brand.Code`, which is the only categorical
+
 ## Exploring the data
+
+> Recap located at the end of the section. Skip there to jump past the code/workflow.
 
 We'll look at:
 
@@ -135,7 +180,7 @@ sum(is.na(test_data))
 
 ```
 
-Overall, 374 values are missing (about 14.5% total missingness). 2038/2571 cases are complete. That's about 79%; 21% of cases are incomplete. Let's also check to see if the data is MCAR.
+Overall, 844 values are missing across the training set, about 1% of all cells. 2038/2571 cases are complete. That's about 79% complete, 21% incomplete. Let's also check to see if the data is MCAR.
 
 ```{r, warning=FALSE}
 library(naniar)
@@ -151,7 +196,16 @@ mcar_test(numeric_only)
 
 The p-value is 0, which means the data most likely isn't missing completely at random (there are patterns in the missing data).
 
+### Recap
+
+- 2571 training cases, 267 evaluation cases, 33 columns in both
+- All `PH` values in the evaluation set are missing. That file is what we predict on, not a test set
+- Missingness concentrates in `MFR` (≈8% training, ≈12% eval), `Brand.Code` (≈5% training), and `Filler.Speed` (≈2% training); everything else under 2%
+- ~79% of training cases are complete; the MCAR test (`naniar::mcar_test`) returned p ≈ 0, so missingness isn't completely at random
+
 ## Data cleaning
+
+> Recap located at the end of the section. Skip there to jump past the code/workflow.
 
 We'll cover:
 
@@ -354,7 +408,17 @@ Oxygen filler shows up again with a few outliers, which just seems to be the cas
 
 We won't remove any of these because they don't look like errors, and in some cases represent a different, smaller cluster of values.
 
+### Recap
+
+- Dropped `Hyd.Pressure1` for near-zero variance
+- Dropped 11 collinear variables (cutoff r > 0.90), keeping one representative per correlated group; manually chose `MFR` over `Filler.Speed` since `MFR` had more missingness
+- Outlier check via IQR + histograms + boxplots: removed two rows only (one with `PH = 9.36`, one with `Filler.Level = 161.2`). Everything else looked like a legitimate value or part of a cluster
+- Removed rows with missing `PH` since we can't impute the response
+- Training data now has 21 columns (20 predictors + `PH`), still pending imputation
+
 ## Dealing with missing values
+
+> Recap located at the end of the section. Skip there to jump past the code/workflow.
 
 ```{r}
 sum(is.na(training_data_no_na))
@@ -415,7 +479,15 @@ sum(is.na(test_data_imputed))
 
 ```
 
+### Recap
+
+- Training set started with 516 missing cells across 2566 rows × 21 columns (~0.9% missingness). Imputed all gaps with VIM `kNN(k = 5)` → `training_data_imputed`
+- Evaluation set: removed one row that had 8 predictor NAs (originally 14 before column drops), then imputed predictor columns only with VIM `kNN(k = 5)` (leaving `PH` blank since that's what we predict) → `test_data_imputed`
+- Both sets are now fully imputed (apart from `PH` in the eval set) and ready for modeling
+
 ## Break into training and test data
+
+> Recap located at the end of the section. Skip there to jump past the code/workflow.
 
 Breaking the training data set into an 80%/20% training and test set:
 
@@ -437,3 +509,8 @@ test_x  <- training_data_imputed[-train_index, ] |> dplyr::select(-PH)
 ### Centering and scaling
 
 I did not scale anything individually, every package should have an option to center/scale automatically, and use a Box-Cox for the data with less normal distributions.
+
+### Recap
+
+- Split `training_data_imputed` 80/20 via `sample()` with `set.seed(1122)`, producing `train_x` / `train_y` (80%) and `test_x` / `test_y` (20%)
+- Centering, scaling, and Box-Cox transformations left to per-model `preProc` options rather than baked in here

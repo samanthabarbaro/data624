@@ -1,0 +1,14 @@
+# R session files
+.Rhistory
+.Rapp.history
+.RData
+.Ruserdata
+
+# RStudio
+.Rproj.user/
+*.Rproj
+
+# Knit build artifacts (PDF is the final deliverable, keep that tracked)
+*.html
+*_files/
+*_cache/
