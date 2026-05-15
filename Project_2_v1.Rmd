@@ -3,16 +3,16 @@ title: "Project 2 Data 624"
 author: "Samantha Barbaro, Catherine Dube, Luis Hernandez"
 date: "2026-05-06"
 output:
-  pdf_document:
-    toc: true
-    toc_depth: 3
-    number_sections: true
   html_document:
     toc: true
     toc_float: true
     toc_depth: 3
     number_sections: true
     code_folding: hide
+  pdf_document:
+    toc: true
+    toc_depth: 3
+    number_sections: true
 ---
 
 # Project 2
@@ -39,7 +39,8 @@ pacman::p_load(
    glmnet,
    randomForest,
    gbm,
-   kernlab
+   kernlab,
+   Cubist
 )
 
 projPath <- if (interactive()) {
@@ -451,7 +452,7 @@ The correlation prune above takes us to 20 predictors. This "pruned" or "narrowe
 So:
 
 - `training_data_new` / `test_data_new`: 20 predictors after Near-zero-variance (NZV) removal and r > 0.90 correlation prune. For use with linear models, PLS, ridge / lasso / elastic net, and neural networks.
-- `training_data_wide` / `test_data_wide`: 31 predictors after just NZV removal. For use with Random forest, gradient boosting, Cubist (if we ever use Cubist). 
+- `training_data_wide` / `test_data_wide`: 31 predictors after just NZV removal. For use with random forest, gradient boosting, and Cubist.
 
 ```{r wide-feature-set}
 # wide feature set: still did NZV removal, plus has the same outlier filters as the narrow set
@@ -993,7 +994,7 @@ kable(residual_summary_gbm)
 
 > Recap located at the end of the section. Skip there to jump past the code/workflow.
 
-Adding a nonlinear non-tree model to round out the family lineup: support vector machine with a radial basis function (RBF) kernel via `kernlab`, wrapped by caret. SVM-radial is sensitive to scaling so it uses the narrow feature set with the same preProcess pipeline as the linear-family models (YeoJohnson, center, scale, knnImpute). Unlike trees, SVM doesn't natively output variable importance; caret falls back to a filter-based metric (LOESS pseudo-R-squared on each predictor).
+Adding a nonlinear non-tree model to the lineup: support vector machine with a radial basis function (RBF) kernel via `kernlab`, wrapped by caret. SVM-radial is sensitive to scaling so it uses the narrow feature set with the same preProcess pipeline as the linear-family models (YeoJohnson, center, scale, knnImpute). Unlike trees, SVM doesn't natively output variable importance; caret falls back to a filter-based metric (LOESS pseudo-R-squared on each predictor).
 
 ### SVM-radial (svmRadial)
 
@@ -1066,11 +1067,90 @@ kable(residual_summary_svm)
 - Top predictive factors via LOESS pseudo-R-squared (this is SVM's filter-based importance, not a native one): `Mnf.Flow` (100), `Usage.cont` (92), `Oxygen.Filler` (87), `Filler.Level` (66), `Filler.Speed` (61), `PC.Volume` (47), `Hyd.Pressure2` (44), `Fill.Pressure` (43), `Brand.Code` (31), `Carb.Pressure1` (30). Worth noting this measures individual predictor strength against pH, not contribution to the SVM model itself.
 - Predicted pH range: 8.18 to 8.86 vs observed 7.88 to 8.94. Similar compression pattern to the other models. Mean residual is a touch off zero (-0.0079), slightly more than the other models but not enough to suggest systematic bias.
 
+## Cubist
+
+> Recap located at the end of the section. Skip there to jump past the code/workflow.
+
+Last model in the lineup: Cubist, a rule-based regression model wrapped by caret. Cubist partitions the data into rules (similar to a decision tree) but fits a linear regression model inside each rule's terminal node, then averages predictions across committees of rules. It uses the wider 31-predictor feature set to match the other tree-family models. The preProcess pipeline includes YeoJohnson and center/scale alongside knnImpute since the linear models inside each rule can benefit from transformed and scaled inputs.
+
+### Cubist
+
+```{r fit-cubist, cache=TRUE}
+set.seed(624)
+
+cubist_model <- train(
+  PH ~ .,
+  data = training_for_modeling_wide,
+  method = "cubist",
+  trControl = controlObject,
+  preProcess = c("YeoJohnson", "center", "scale", "knnImpute"),
+  na.action = na.pass,
+  tuneLength = 10
+)
+
+models$cubist <- cubist_model
+
+# append CV metrics to the running comparison table
+model_metrics <- bind_rows(
+  model_metrics,
+  getTrainPerf(cubist_model) %>%
+    transmute(model = "cubist",
+              cv_RMSE = TrainRMSE,
+              cv_Rsquared = TrainRsquared,
+              cv_MAE = TrainMAE)
+)
+
+cubist_model
+```
+
+**Variable importance.**
+
+```{r cubist-varimp}
+plot(varImp(cubist_model), top = 20)
+```
+
+**Residual summary.**
+
+```{r cubist-residuals}
+cubist_preds <- cubist_model$pred
+cubist_preds$residual <- cubist_preds$obs - cubist_preds$pred
+
+residual_summary_cubist <- tibble(
+  metric = c("Mean residual",
+             "SD residual",
+             "Max |residual|",
+             "99th pct |residual|",
+             "Cor(predicted, residual)",
+             "Predicted PH range",
+             "Observed PH range"),
+  value = c(
+    sprintf("%.5f", mean(cubist_preds$residual)),
+    sprintf("%.4f", sd(cubist_preds$residual)),
+    sprintf("%.4f", max(abs(cubist_preds$residual))),
+    sprintf("%.4f", quantile(abs(cubist_preds$residual), 0.99)),
+    sprintf("%.4f", cor(cubist_preds$pred, cubist_preds$residual)),
+    sprintf("%.3f to %.3f", min(cubist_preds$pred), max(cubist_preds$pred)),
+    sprintf("%.3f to %.3f", min(cubist_preds$obs), max(cubist_preds$obs))
+  )
+)
+kable(residual_summary_cubist)
+```
+
+### Recap
+
+- Cubist trained via 10-fold CV on the wider 31-predictor feature set. Fitted model stored in `models$cubist`, CV metrics appended to `model_metrics`.
+- CV residuals are centered near zero (mean residual `r sprintf("%.5f", mean(cubist_preds$residual))`), so the model has almost no average bias. The negative value means it's slightly overpredicting PH on average, but the effect is tiny.
+- Residual SD `r sprintf("%.4f", sd(cubist_preds$residual))`, in the same ballpark as the random forest residual spread. Most prediction errors are within roughly a tenth of a PH unit.
+- Max absolute residual `r sprintf("%.4f", max(abs(cubist_preds$residual)))` with the 99th percentile at `r sprintf("%.4f", quantile(abs(cubist_preds$residual), 0.99))`. Most errors are small, with a handful of outlier misses that may be unusual production conditions or observations where the process variables don't fully explain PH.
+- Predicted PH range `r sprintf("%.3f", min(cubist_preds$pred))` to `r sprintf("%.3f", max(cubist_preds$pred))` vs observed `r sprintf("%.3f", min(cubist_preds$obs))` to `r sprintf("%.3f", max(cubist_preds$obs))`. Cubist reaches further up than random forest did, getting closer to (or past) the observed maximum, but still doesn't quite hit the lowest observed values.
+- Correlation between predicted PH and residuals is `r sprintf("%.4f", cor(cubist_preds$pred, cubist_preds$residual))`, close to zero. No strong systematic over/underprediction pattern at different PH levels. The small residual trend we saw in random forest is not present here.
+- Overall a strong showing: residuals near zero, low spread, and a broader prediction range than most of the other models. The handful of high-error cases would be worth a closer look before final selection.
+
 ## Model comparison
 
 > Recap located at the end of the section. Skip there to jump past the code/workflow.
 
-All five models trained on the same shared CV folds. Comparing on identical resampling structure via `resamples()`:
+All six models trained on the same shared CV folds. Comparing on identical resampling structure via `resamples()`:
 
 ```{r resamples-comparison}
 resamps <- resamples(models)
@@ -1090,12 +1170,12 @@ kable(model_metrics %>% arrange(cv_RMSE))
 
 ### Recap
 
-- Five models trained: linear regression (lm), elastic net, random forest (RF), gradient boosting (gbm), and support vector machine with radial kernel (SVM-radial). Ranked by cross-validated RMSE: random forest (0.093) < gradient boosting (0.107) < SVM-radial (0.123) < elastic net (0.135) ~= linear regression (0.135).
-- **Random forest wins** with cross-validated RMSE 0.0926, R-squared 0.7177, MAE 0.0672. It cuts the linear-family RMSE by about a third and almost doubles R-squared.
-- Gradient boosting came in second (RMSE 0.107, R-squared 0.612). It did better than the linear models and SVM-radial, but didn't match random forest. The tuning landed at the largest settings we tested, so gbm might have kept improving with more tuning room, but the gap to random forest was large enough that we didn't bother to chase it further.
-- SVM-radial sits in between the linear and tree-based models (RMSE 0.123, R-squared 0.494). The radial kernel lets it fit curved relationships, which helps it do better than the linear models. But SVM-radial is a single model while random forest and gradient boosting each combine many trees into one prediction, which is probably the main reason those two outperform SVM-radial here.
+- Six models trained: linear regression (lm), elastic net, random forest (RF), gradient boosting (gbm), support vector machine with radial kernel (SVM-radial), and Cubist. Ranked by cross-validated RMSE: Cubist (0.0926) ~= random forest (0.0926) < gradient boosting (0.107) < SVM-radial (0.123) < elastic net (0.135) ~= linear regression (0.135).
+- **Cubist edges out random forest at the top.** Cubist: RMSE 0.0926, R-squared 0.7093, MAE 0.0666. RF: RMSE 0.0926, R-squared 0.7177, MAE 0.0672. Cubist wins on RMSE (by about 3e-5) and MAE (by about 1%); random forest wins on R-squared (by about 1%). Random forest was also a bit more stable in the per-fold RMSE distribution. The two are tied in practice; the auto-pick on lowest CV RMSE selects Cubist.
+- Gradient boosting came in third (RMSE 0.107, R-squared 0.612). It did better than the linear models and SVM-radial, but didn't match the top two. The tuning landed at the largest settings we tested, so gbm might have kept improving with more tuning room, but the gap to the top was large enough that we didn't bother to chase it further.
+- SVM-radial sits in between the linear and top tree/rule-based models (RMSE 0.123, R-squared 0.494). The radial kernel lets it fit curved relationships, which helps it do better than the linear models. But SVM-radial is a single model while random forest, gradient boosting, and Cubist each combine many sub-models into one prediction, which is probably the main reason those three outperform SVM-radial here.
 - Linear regression (lm) and elastic net are basically tied at the bottom (RMSE 0.135, R-squared 0.38). The linear family probably can't improve further on this dataset; elastic net's tuning confirmed there's no useful coefficient shrinkage to extract beyond what plain linear regression already finds.
-- **Picking random forest** as our final model. It's the clear leader, generalizes well, and gives us strong variable importance for the business writeup.
+- **Picking Cubist** as our final model. It won the auto-pick on lowest CV RMSE, its rule-based structure (rules with linear models inside each terminal node) is more transparent than RF's ensemble, and its predicted PH range tracks the observed range more closely than RF does. Random forest is essentially tied and remains a defensible alternative if anyone on the team prefers it for stability or familiarity.
 
 ## Evaluation set predictions
 
@@ -1122,7 +1202,8 @@ model_feature_set <- c(
   elastic_net = "narrow",
   svm_radial = "narrow",
   random_forest = "wide",
-  gbm = "wide"
+  gbm = "wide",
+  cubist = "wide"
 )
 
 if (!best_model_name %in% names(model_feature_set)) {
@@ -1174,21 +1255,21 @@ head(predictions_output)
 ### Recap
 
 - Predictions for the evaluation set get written to `abc_beverage_PH_predictions.csv` in the project root. The output has four columns: `row_id`, `Brand.Code`, `predicted_PH`, and a `notes` column that flags rows where the original evaluation data had 5+ predictor NAs (since those predictions lean heavily on imputed values).
-- The chunk picks the best model dynamically by lowest CV RMSE in `model_metrics`. Right now that's random forest.
+- The chunk picks the best model dynamically by lowest CV RMSE in `model_metrics`. Right now that's `r best_model_name`.
 - Adding a new model in the future just means appending an entry to `model_feature_set` inside the chunk (narrow or wide); the chunk picks up whichever model has the lowest CV RMSE.
 
 ## Business takeaways (Informal)
 
 The non-technical report needs these for ABC Beverage leadership:
 
-1. **The model.** Random forest is our chosen final model with cross-validated RMSE 0.093, R-squared 0.72, MAE 0.067. That's substantially better than the linear family (linear regression and elastic net both at RMSE 0.135, R-squared 0.38). Of the five models we tried, random forest was a clear leader; gradient boosting came in second but did not perform as well.
-2. **The factors.** Consistent themes across all five models:
-   - `Mnf.Flow`: the single most predictive variable across every model. Lower flow correlates with higher PH.
-   - `Brand.Code`: a real driver. Random forest emphasizes Brand C the most (the brand with the lowest baseline pH). Linear models give the strongest weight to Brand D instead, with C and B also significant. Either way, the brand a beverage is made under has a measurable effect on PH.
-   - `Pressure.Vacuum`, `Alch.Rel`, `Balling.Lvl`, `Carb.Rel`: surface as important in the tree-based models. These were dropped from the linear-family models due to collinearity, so they're "new" levers that pure linear analysis would have missed.
+1. **The model.** Cubist is our chosen final model with cross-validated RMSE 0.093, R-squared 0.71, MAE 0.067. Random forest came in essentially tied (RMSE 0.093, R-squared 0.72, MAE 0.067) and is a defensible alternative. Both are substantially better than the linear family (linear regression and elastic net both at RMSE 0.135, R-squared 0.38). Of the six models we tried, Cubist and random forest were the clear top two; gradient boosting came in third.
+2. **The factors.** Consistent themes across all six models:
+   - `Mnf.Flow`: the single most predictive variable across the lineup. Lower flow correlates with higher PH. Cubist puts it at the top; random forest has it tied at the top with Brand.Code C.
+   - `Brand.Code`: a real driver in most models, though weighted differently. Random forest emphasizes Brand C the most (the brand with the lowest baseline PH). Linear models give the strongest weight to Brand D instead, with C and B also significant. Cubist gives Brand.Code less weight than the other models do, leaning more on continuous process variables. Either way, the brand a beverage is made under has a measurable effect on PH.
+   - `Pressure.Vacuum`, `Alch.Rel`, `Balling.Lvl`, `Carb.Rel`: surface as important in the tree-based and rule-based models. These were dropped from the linear-family models due to collinearity, so they're "new" levers that pure linear analysis would have missed.
    - `Temperature`, `Usage.cont`, and `Oxygen.Filler`: appear at or near the top of every model.
-3. **The recommendation.** Tighter operational tolerances and sensor monitoring on the top 4-5 predictors (or you could call them levers); each brand should get its own production targets since `Brand.Code` is consistently one of the top predictors of PH (the right settings for Brand A probably aren't the right settings for Brand D). For our random-forest-driven recommendation specifically: focus on `Mnf.Flow`, `Brand.Code`-aware standards, `Pressure.Vacuum`, `Oxygen.Filler`, and `Alch.Rel`.
+3. **The recommendation.** Tighter operational tolerances and sensor monitoring on the top 4-5 predictors (or you could call them levers); each brand should get its own production targets since `Brand.Code` is consistently one of the top predictors of PH across most of the lineup (the right settings for Brand A probably aren't the right settings for Brand D). Specifically: focus on `Mnf.Flow` first (top driver in Cubist and tied at the top in random forest), then `Brand.Code`-aware standards, then the process variables `Pressure.Vacuum`, `Oxygen.Filler`, and `Alch.Rel`.
 
 ### Recap
 
-- This is our working scratch pad for the executive doc. Random forest is our chosen final model and the factors / recommendation bullets above are the current draft. We'll keep iterating on the phrasing as we polish for the team's non-technical report.
+- This is our working scratch pad for the executive doc. Cubist is our chosen final model (with random forest essentially tied as a defensible alternative) and the factors / recommendation bullets above are the current draft. We'll keep iterating on the phrasing as we polish for the team's non-technical report.
